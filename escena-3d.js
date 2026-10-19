@@ -3822,7 +3822,8 @@ function init(){
     const go = (dl) => { try { while (!d.inst.step()){ if (dl.timeRemaining() < 3){ idle(go); return; } } } catch (err){ console.error(err); } };   // a few milliseconds at a time
     idle(go);
   })), 3500);
-  const GAZE = Math.cos(D2R(15)), NEAR = Math.cos(D2R(26)), DWELL = 0.55;
+  // a wide aim: 33°, the most it can be while every light is still out of reach from the first view (the nearest sits at 39°)
+  const GAZE = Math.cos(D2R(33)), NEAR = Math.cos(D2R(37)), DWELL = 0.55;
   let found = 0;
   const cineOn = () => { try { return cine; } catch (err){ return false; } };   // declared further down, with the UI
   /* tap a light to play it: a short tap (not a drag) close to where the light is on screen */
@@ -3891,6 +3892,8 @@ function init(){
       }
       if (show !== p.orbOn){ p.orbOn = show; p.orb.classList.toggle('on', show); p.orb.tabIndex = show ? 0 : -1; }
     }
+    let aimP = null, aimS = -2;   // with such a wide aim two lights can be in reach: only the one nearest the centre counts
+    for (const p of points){ if (p.state !== 'idle') continue; const sd = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf); if (sd > aimS){ aimS = sd; aimP = p; } }
     for (const p of points){
       if (p.state === 'on'){
         p.ring.visible = false;
@@ -3901,7 +3904,7 @@ function init(){
       }
       if (p.state === 'spent'){ p.glint.visible = p.ring.visible = false; continue; }
       const s = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf), near = smooth(NEAR, GAZE, s);
-      p.dwell = s > GAZE && !cineOn() && !playing ? p.dwell + raw : Math.max(0, p.dwell - raw * 2);   // the slow cinematic drift never fires a light by itself, nor does anything while an event plays
+      p.dwell = p === aimP && s > GAZE && !cineOn() && !playing ? p.dwell + raw : Math.max(0, p.dwell - raw * 2);   // the slow cinematic drift never fires a light by itself, nor does anything while an event plays
       if (p.dwell >= DWELL){ playPoint(p); continue; }
       const g = p.glint, pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + p.ph), pi = points.indexOf(p);
       const wave = Math.exp(-Math.pow(((t % 7) - 1 - pi * 0.22) / 0.16, 2));   // every few seconds a flare runs from light to light
