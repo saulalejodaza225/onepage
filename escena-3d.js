@@ -1185,7 +1185,7 @@ function init(){
      The device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near upright.
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
-  const GYRO_GAIN = 1.9;
+  const GYRO_GAIN = 2.4;
   const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
@@ -1210,7 +1210,7 @@ function init(){
     // the orbit pose at calibration is the reference; the phone's rotation is applied on top of it
     if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
     _ge.setFromQuaternion(gyro.cur, 'YXZ');
-    // amplified: turning the phone by X degrees turns the view by about 2X, so there is no need to twist it far
+    // amplified: turning the phone by X degrees turns the view by about 2.4X, so a small tilt is enough
     gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x * GYRO_GAIN, 0.3, 2.85), gyro.cal.theta + _ge.y * GYRO_GAIN);
     camera.position.copy(controls.target).add(off.setFromSpherical(gsph));
     camera.lookAt(controls.target);

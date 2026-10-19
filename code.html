@@ -85,17 +85,18 @@
     #nogl[hidden] { display: none; }
     #gyro-note { position: absolute; left: 16px; right: 16px; top: 16px; max-width: 440px; margin: 0 auto; padding: 12px 14px; border-radius: 14px; background: rgba(10,8,24,0.82); border: 1px solid var(--color-border-subtle); color: var(--color-text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; z-index: 3; }
     #gyro-note[hidden] { display: none; }
-    #moments-hud { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; transform: none; z-index: 3; display: block; max-width: calc(100% - 156px); padding: 7px 14px; border-radius: 16px; background: rgba(5,7,13,0.55); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; line-height: 1.4; color: var(--color-text-muted); white-space: normal; text-align: center; width: max-content; pointer-events: none; }
+    #moments-hud { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; transform: none; z-index: 3; display: block; max-width: calc(100% - 32px); padding: 7px 14px; border-radius: 16px; background: rgba(5,7,13,0.55); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; line-height: 1.4; color: var(--color-text-muted); white-space: normal; text-align: center; width: max-content; pointer-events: none; }
     #moments-hud .dot { display: inline-block; vertical-align: middle; margin: -2px 6px 0 0; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent-cyan); box-shadow: 0 0 8px var(--color-accent-cyan); animation: momentsPulse 1.8s ease-in-out infinite; }
     @keyframes momentsPulse { 50% { opacity: 0.3; } }
     #moment-toast { position: absolute; top: calc(52px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; margin: 0 auto; max-width: 340px; z-index: 3; padding: 8px 14px; border-radius: 14px; background: rgba(10,8,24,0.8); border: 1px solid rgba(92,225,255,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-align: center; pointer-events: none; opacity: 0; transform: translateY(-8px); transition: opacity 0.35s ease, transform 0.35s ease; }
     #moment-toast.show { opacity: 1; transform: none; }
     #moment-toast[hidden] { display: none; }
-    #btn-estabilizar { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; z-index: 4; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--color-border-subtle); background: rgba(5,7,13,0.6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: var(--color-text-main); font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; cursor: pointer; pointer-events: auto; transition: border-color 0.2s, background 0.2s; touch-action: manipulation; }
-    #btn-estabilizar:hover { border-color: var(--color-accent-cyan); background: rgba(92,225,255,0.08); }
-    #btn-estabilizar:active { transform: scale(0.97); }
+    /* stabilize: just the icon, transparent, sitting above the "A" of the title */
+    #btn-estabilizar { align-self: flex-start; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0 0 2px -11px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--color-text-main); opacity: 0.82; cursor: pointer; pointer-events: auto; filter: drop-shadow(0 1px 6px rgba(0,0,0,0.65)); transition: opacity 0.2s, color 0.2s, transform 0.15s; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    #btn-estabilizar:hover { opacity: 1; color: var(--color-accent-cyan); }
+    #btn-estabilizar:active { transform: scale(0.9); }
     #btn-estabilizar:focus-visible { outline: 2px solid var(--color-accent-cyan); outline-offset: 2px; }
-    #btn-estabilizar svg { width: 16px; height: 16px; flex: none; }
+    #btn-estabilizar svg { width: 22px; height: 22px; flex: none; }
     #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 2px; }
     #moment-toast span { font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-text-main); }
     /* the five lights: orbs drawn over the 3D view, each one opens a hidden moment */
@@ -314,10 +315,6 @@
       <div id="lights" role="group" aria-label="Momentos ocultos"></div>
       <div id="aim" aria-hidden="true"><svg viewBox="0 0 56 56"><circle class="under" cx="28" cy="28" r="20"/><circle class="track" cx="28" cy="28" r="20"/><circle class="fill" cx="28" cy="28" r="20" pathLength="100"/></svg><span class="chev"></span></div>
       <div id="light-hint" aria-hidden="true">toca la luz</div>
-      <button id="btn-estabilizar" type="button" aria-label="Estabilizar la cámara y recuperar el control">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
-        Estabilizar
-      </button>
     </section>
 
   <main class="screen-container">
@@ -326,6 +323,9 @@
     <section class="content-container">
       <!-- 2. Bloque de texto -->
       <div class="text-block">
+        <button id="btn-estabilizar" type="button" aria-label="Estabilizar la cámara y recuperar el control" title="Estabilizar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        </button>
         <h1 id="title">Arquitectura digital inconfundible</h1>
         <p id="subtitle">explora tu página ideal</p>
       </div>
@@ -341,7 +341,7 @@
       <div class="quiz" id="quiz" role="region" aria-labelledby="quiz-q" hidden>
         <div class="quiz-top">
           <span class="quiz-eyebrow">Tu página ideal · 5 preguntas</span>
-          <button type="button" class="quiz-back" aria-label="Volver al inicio">← Volver</button>
+          <button type="button" class="quiz-back" aria-label="Minimizar el cuestionario sin perder tus respuestas">← Volver</button>
         </div>
         <div class="quiz-bar" aria-hidden="true"><span></span></div>
         <p class="quiz-count" aria-live="polite"></p>
@@ -375,7 +375,9 @@
   <script>
     // Cuestionario: 5 preguntas; cada respuesta suma puntos a los cuatro modelos
     // (L = Landing, P = PYME, E = Empresarial, T = Tienda). Gana el de más puntos;
-    // en empate, el primero de la lista. Mismas preguntas, precios y demos que el sitio.
+    // en empate, el primero de la lista. Mismos precios y demos que el sitio.
+    // "Volver" solo minimiza: al abrirlo de nuevo sigue en la misma pregunta o muestra el resultado;
+    // únicamente "Volver a empezar" lo reinicia.
     (function () {
       var PREGUNTAS = [
         { q: '¿Qué tiene hoy tu negocio en línea?', o: [
@@ -400,10 +402,11 @@
           { t: 'Sí, con Wompi, PayU o PSE', p: { T: 3 } },
           { t: 'Por ahora no, pero lo planeo', p: { P: 1, E: 1 } }
         ] },
-        { q: '¿Para cuándo necesitas tu página lista?', o: [
-          { t: 'Lo antes posible (menos de una semana)', p: { L: 2 } },
-          { t: 'En un par de semanas', p: { P: 1, E: 1 } },
-          { t: 'Tengo tiempo para un proyecto completo', p: { E: 2, T: 1 } }
+        { q: '¿Cómo describirías tu negocio?', o: [
+          { t: 'Independiente o emprendimiento con un servicio principal', p: { L: 2 } },
+          { t: 'Negocio local: consultorio, restaurante, taller o estudio', p: { P: 2 } },
+          { t: 'Empresa con varias áreas, sedes o líneas de servicio', p: { E: 2 } },
+          { t: 'Comercio con productos para vender y enviar', p: { T: 2 } }
         ] }
       ];
       var MODELOS = {
@@ -423,7 +426,7 @@
       var quiz = document.getElementById('quiz');
       var barra = quiz.querySelector('.quiz-bar span'), contador = quiz.querySelector('.quiz-count'), pregunta = quiz.querySelector('.quiz-q');
       var opciones = quiz.querySelector('.quiz-options'), resultado = quiz.querySelector('.quiz-result');
-      var paso = 0, puntos = { L: 0, P: 0, E: 0, T: 0 };
+      var paso = 0, puntos = { L: 0, P: 0, E: 0, T: 0 }, iniciado = false, terminado = false;
 
       function mostrarPaso() {
         var p = PREGUNTAS[paso];
@@ -458,17 +461,19 @@
         quiz.querySelector('.quiz-r-text').textContent = m.texto;
         var demo = quiz.querySelector('.quiz-demo');
         demo.href = m.demo; demo.setAttribute('aria-label', 'Ver demo de ' + m.nombre + ' (se abre en una pestaña nueva)');
-        resultado.hidden = false;
+        resultado.hidden = false; terminado = true;
         quiz.querySelector('.quiz-r-name').focus({ preventScroll: true });
       }
-      function empezar() { paso = 0; puntos = { L: 0, P: 0, E: 0, T: 0 }; quiz.scrollTop = 0; mostrarPaso(); }
+      function empezar() { paso = 0; puntos = { L: 0, P: 0, E: 0, T: 0 }; iniciado = true; terminado = false; quiz.scrollTop = 0; mostrarPaso(); }
 
       cta.addEventListener('click', function () {
         textos.hidden = true; botonera.hidden = true; quiz.hidden = false;
-        empezar();
+        if (terminado) quiz.querySelector('.quiz-r-name').focus({ preventScroll: true });   // the result is still there
+        else if (iniciado) pregunta.focus({ preventScroll: true });   // back to the same question
+        else empezar();
       });
       quiz.querySelector('.quiz-restart').addEventListener('click', empezar);
-      quiz.querySelector('.quiz-back').addEventListener('click', function () {
+      quiz.querySelector('.quiz-back').addEventListener('click', function () {   // minimise only, nothing is lost
         quiz.hidden = true; textos.hidden = false; botonera.hidden = false;
         cta.focus({ preventScroll: true });
       });
