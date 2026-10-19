@@ -3018,137 +3018,344 @@ function init(){
 
   /* ===== group 5 · signals ===== */
   const SIGNALS = [
-    { name: 'Grieta a la Tierra', line: 'Una grieta se abre sobre Bogotá de noche… y caes hacia sus luces, con Monserrate encendido.', dur: 12.5, make(P){
-      // the city is painted once on a large canvas (design units 2048×1365, drawn at 1.5×);
-      // the crack shows a moving, zooming window onto it, with traffic and lights animated on top
-      const DW = 2048, DH = 1365, SC = 1.5, HZ = 560, VPX = 1010;   // horizon height and vanishing point of the savanna
-      const city = makeCanvas(DW * SC, DH * SC), cg = city.getContext('2d'); cg.scale(SC, SC);
-      const rnd = mulberry32(4711);   // the same city every time
-      const TOWERS = [];   // tall buildings, for the blinking red lights
-      {
-        // sky: deep night above, the orange glow of the city along the hills
-        const sky = cg.createLinearGradient(0, 0, 0, HZ + 80); sky.addColorStop(0, '#03060f'); sky.addColorStop(0.45, '#0d1433'); sky.addColorStop(0.8, '#2b2346'); sky.addColorStop(1, '#5a3a3a');
-        cg.fillStyle = sky; cg.fillRect(0, 0, DW, HZ + 80);
-        for (let i = 0; i < 420; i++){ const y = rnd() * HZ * 0.75; cg.fillStyle = 'rgba(255,255,255,' + (0.2 + rnd() * 0.7) * (1 - y / HZ) + ')'; const s = rnd() < 0.08 ? 2.2 : 1.2; cg.fillRect(rnd() * DW, y, s, s); }
-        for (let i = 0; i < 9; i++){   // low clouds lit from below
-          const x = rnd() * DW, y = 120 + rnd() * 260, rx = 160 + rnd() * 260, ry = 26 + rnd() * 34;
-          const g = cg.createRadialGradient(x, y + ry * 0.5, 4, x, y, rx); g.addColorStop(0, 'rgba(255,150,90,0.16)'); g.addColorStop(0.5, 'rgba(120,80,110,0.09)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-          cg.fillStyle = g; cg.beginPath(); cg.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); cg.fill();
-        }
-        // the eastern hills in three layers; Monserrate (left peak) and Guadalupe (right peak)
-        const ridge = (pts, col) => { cg.fillStyle = col; cg.beginPath(); cg.moveTo(0, DH); pts.forEach(([x, y]) => cg.lineTo(x, y)); cg.lineTo(DW, DH); cg.fill(); };
-        const jag = (base, amp, peaks) => { const pts = []; for (let x = 0; x <= DW; x += 16){ let y = base + Math.sin(x * 0.004) * 18 + (rnd() - 0.5) * 10; peaks.forEach(([px, py, w]) => { y = Math.min(y, py + Math.pow(Math.abs(x - px) / w, 1.4) * amp); }); pts.push([x, y]); } return pts; };
-        ridge(jag(430, 120, [[600, 330, 420], [1500, 360, 480]]), '#0d1426');
-        ridge(jag(470, 150, [[905, 300, 300], [1260, 330, 330]]), '#0a1020');
-        ridge(jag(530, 60, [[300, 470, 380], [1750, 480, 400]]), '#080d19');
-        // the church on Monserrate and the statue on Guadalupe, both lit; the cable car and funicular down the hill
-        cg.save(); cg.shadowColor = '#fff1c8'; cg.shadowBlur = 22; cg.fillStyle = '#fff6df';
-        cg.fillRect(888, 286, 34, 16); cg.fillRect(898, 270, 12, 18); cg.beginPath(); cg.moveTo(898, 270); cg.lineTo(904, 258); cg.lineTo(910, 270); cg.fill();
-        cg.fillRect(1257, 312, 5, 20); cg.beginPath(); cg.arc(1259.5, 309, 4, 0, Math.PI * 2); cg.fill(); cg.restore();
-        cg.strokeStyle = 'rgba(255,220,150,0.65)'; cg.lineWidth = 1.6; cg.setLineDash([3, 6]);
-        cg.beginPath(); cg.moveTo(905, 305); cg.lineTo(830, 560); cg.stroke(); cg.beginPath(); cg.moveTo(912, 305); cg.quadraticCurveTo(900, 450, 870, 565); cg.stroke(); cg.setLineDash([]);
-        for (let i = 0; i < 380; i++){ const x = rnd() * DW, y = 440 + rnd() * 140; cg.fillStyle = 'rgba(255,200,130,' + (0.25 + rnd() * 0.5) + ')'; cg.fillRect(x, y, 1.6, 1.6); }   // houses on the slopes
-        // the savanna: glow, then blocks of buildings receding in perspective
-        const glow = cg.createLinearGradient(0, HZ - 20, 0, DH); glow.addColorStop(0, 'rgba(255,140,70,0.35)'); glow.addColorStop(0.25, 'rgba(60,40,60,0.6)'); glow.addColorStop(1, 'rgba(8,10,20,1)');
-        cg.fillStyle = glow; cg.fillRect(0, HZ - 20, DW, DH - HZ + 20);
-        let y = HZ + 2;
-        while (y < DH){
-          const depth = (y - HZ) / (DH - HZ), s = 0.25 + depth * 2.6, rowH = 3 + depth * 26;
-          let x = -rnd() * 40 * s;
-          while (x < DW){
-            const w = (18 + rnd() * 34) * s, h = (6 + rnd() * 22) * s * (Math.abs(x - VPX) < 260 && depth < 0.3 ? 2.4 : 1);
-            cg.fillStyle = 'rgb(' + (10 + rnd() * 8 | 0) + ',' + (12 + rnd() * 8 | 0) + ',' + (22 + rnd() * 10 | 0) + ')';
-            cg.fillRect(x, y - h, w, h + rowH);
-            const ws = Math.max(1, 1.1 + 0.8 * s), gap = ws * 2.3;   // lit windows (far away, just a few dots)
-            if (s < 0.7){ for (let q = 0; q < 3; q++) if (rnd() < 0.7){ cg.fillStyle = 'rgba(255,196,120,' + (0.5 + rnd() * 0.5) + ')'; cg.fillRect(x + rnd() * w, y - h + rnd() * h, 1.4, 1.4); } }
-            else for (let wy = y - h + gap; wy < y + rowH * 0.6; wy += gap) for (let wx = x + gap * 0.6; wx < x + w - ws; wx += gap){
-              if (rnd() < 0.42){ const warm = rnd(); cg.fillStyle = warm < 0.7 ? 'rgba(255,196,120,' + (0.55 + rnd() * 0.45) + ')' : warm < 0.92 ? 'rgba(210,230,255,0.85)' : 'rgba(255,240,200,1)'; cg.fillRect(wx, wy, ws, ws * 0.8); }
-            }
-            x += w + (2 + rnd() * 8) * s;
+    { name: 'Grieta a la Tierra', line: 'Una grieta se abre sobre Bogotá… y caes hacia Monserrate, con toda la ciudad a sus pies.', dur: 13, prewarm: true, make(P){
+      const job = (function* (){
+      /* a small Bogotá in 3D, filmed by its own drone camera into a texture and seen through the crack: the sanctuary of
+         Monserrate on its summit (white walls, red tile roofs, the round apse, the bell tower), the forest of the eastern
+         hills, and the savanna covered in city up to the far mountains, under a sunset sky.
+         Units: 1 = 10 m. The summit is y = 0, the city lies 500 m below, to the west (-Z); north is +X. */
+      const rnd = mulberry32(4711);
+      const dio = new THREE.Scene(), HAZE = C('#bdb4a8');
+      dio.fog = new THREE.FogExp2(HAZE, 0.0027);
+      const SUN = V(-0.8, 0.2, -0.55).normalize();
+      dio.add(new THREE.HemisphereLight(C('#e2e5ee'), C('#55603f'), 0.9));
+      const sunL = new THREE.DirectionalLight(C('#ffd49c'), 1.25); sunL.position.copy(SUN).multiplyScalar(100); dio.add(sunL);
+      const PL = -50, SZ = 900;
+      const hgt = (x, z) => {
+        const crest = -6 + 10 * (1 - Math.exp(-x * x / 1200)) + 3.5 * Math.sin(x * 0.031) + 3 * Math.sin(x * 0.009 + 1);   // Monserrate low on the ridge, Guadalupe higher to the north
+        let h = PL + (crest - PL) * smooth(-62, 6, z);
+        const fold = smooth(-66, -40, z) * (1 - smooth(0, 14, z));   // the creases of the hillside (only where they show, it is the costly part)
+        if (fold > 0) h += 5.2 * (pnoise2(x * 0.06 + 500, z * 0.06 + 500, 4096, 4096, 7) - 0.5) * fold;
+        const r = Math.hypot(x, z + 0.5); h = lerp(h, -0.02 * r * r, smooth(22, 8, r));   // the summit, a dome levelled for the sanctuary
+        h += 34 * smooth(-240, -420, z) * (0.55 + 0.45 * Math.sin(x * 0.017 + 1.3)) + 26 * smooth(220, 400, Math.abs(x));   // the far ranges
+        return h;
+      };
+      // the big avenues: Carrera Séptima and Caracas along the hills, Calle 26 to the west, the Avenida 68 across
+      const AVES = [[-260, -67, 260, -63], [-260, -112, 260, -104], [26, -64, 72, -420], [230, -92, -210, -340], [-260, -196, 260, -178]];
+      const dSeg = (x, z, a) => { const dx = a[2] - a[0], dz = a[3] - a[1], k = THREE.MathUtils.clamp(((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz), 0, 1); return Math.hypot(x - a[0] - dx * k, z - a[1] - dz * k); };
+      const ROOF = [[150, 74, 52], [172, 92, 60], [138, 64, 48], [128, 120, 112], [178, 162, 142], [200, 192, 180]];
+      // the ground, painted once: forest on the hills, the patchwork of roofs and streets on the savanna, parks
+      const GT = 512, gcv = makeCanvas(GT, GT), gx = gcv.getContext('2d'), img = gx.createImageData(GT, GT), px8 = img.data;
+      for (let j = 0; j < GT; j++){
+        if ((j & 7) === 7) yield;
+        const z = (j / GT - 0.5) * SZ;
+        for (let i = 0; i < GT; i++){
+          const x = (i / GT - 0.5) * SZ, o = (j * GT + i) * 4;
+          const n = pnoise2(i / 15, j / 15, 64, 64, 3), m = rnd();
+          let r = 46 + 26 * m, g = 76 + 34 * m + 14 * n, b = 42 + 16 * m;
+          const city = smooth(-54, -66, z) * (1 - smooth(-280, -360, z)) * (1 - smooth(230, 320, Math.abs(x)));
+          if (city > 0){
+            const street = ((i + (j >> 4)) % 5 === 0) || (j % 5 === 0);
+            let c = ROOF[(rnd() * ROOF.length) | 0];
+            if (rnd() < 0.7 * smooth(25, -20, x) * smooth(-130, -75, z)) c = ROOF[(rnd() * 3) | 0];   // La Candelaria and the old south: red tile everywhere
+            const sh = 0.72 + 0.4 * rnd();
+            let cr = c[0] * sh, cgg = c[1] * sh, cb = c[2] * sh;
+            if (street){ cr = cgg = 98; cb = 100; }
+            if (n > 0.8){ cr = 70; cgg = 108; cb = 60; }   // parks
+            r = lerp(r, cr, city); g = lerp(g, cgg, city); b = lerp(b, cb, city);
           }
-          y += rowH * (0.9 + rnd() * 0.3);
+          px8[o] = r; px8[o + 1] = g; px8[o + 2] = b; px8[o + 3] = 255;
         }
-        // the downtown towers at the foot of the hills: Colpatria (left) and BD Bacatá (right), plus a few more
-        const tower = (x, base, w, h, lit) => {
-          cg.fillStyle = '#0a0e1a'; cg.fillRect(x, base - h, w, h);
-          for (let wy = base - h + 6; wy < base; wy += 5) for (let wx = x + 3; wx < x + w - 3; wx += 4) if (rnd() < lit){ cg.fillStyle = rnd() < 0.8 ? 'rgba(255,214,150,0.9)' : 'rgba(200,225,255,0.9)'; cg.fillRect(wx, wy, 2, 2.4); }
-          TOWERS.push([x + w / 2, base - h]);
-        };
-        tower(930, 640, 26, 150, 0.35); tower(975, 645, 22, 120, 0.4); tower(1012, 650, 34, 245, 0.25);   // Colpatria
-        tower(1080, 648, 20, 270, 0.35); tower(1104, 648, 20, 250, 0.35);   // the twin BD Bacatá
-        tower(1150, 652, 30, 140, 0.45); tower(1200, 655, 24, 110, 0.5); tower(880, 652, 24, 100, 0.5);
-        // avenues: lines of sodium light running to the vanishing point
-        cg.lineCap = 'round';
-        [-1500, -900, -420, 120, 560, 1100, 1800, 2600].forEach((bx) => {
-          const g = cg.createLinearGradient(0, DH, 0, HZ); g.addColorStop(0, 'rgba(255,170,80,0.95)'); g.addColorStop(1, 'rgba(255,170,80,0.15)');
-          cg.strokeStyle = g; cg.lineWidth = 3.2; cg.beginPath(); cg.moveTo(bx, DH); cg.lineTo(VPX + (bx - VPX) * 0.04, HZ + 8); cg.stroke();
-        });
-        for (let k = 1; k < 9; k++){ const yy = HZ + Math.pow(k / 9, 1.8) * (DH - HZ); cg.strokeStyle = 'rgba(255,175,95,' + (0.18 + k * 0.04) + ')'; cg.lineWidth = 0.6 + k * 0.18; cg.beginPath(); cg.moveTo(0, yy + Math.sin(k) * 6); cg.lineTo(DW, yy - Math.sin(k) * 6); cg.stroke(); }
       }
-      // moving cars along the avenues (white heading out, red heading in)
-      const AVE = [-1500, -900, -420, 120, 560, 1100, 1800, 2600], cars = [];
-      for (let i = 0; i < 140; i++) cars.push({ a: AVE[(rnd() * AVE.length) | 0], k: rnd(), v: (0.02 + rnd() * 0.04) * (rnd() < 0.5 ? 1 : -1), side: rnd() < 0.5 ? -1 : 1 });
+      gx.putImageData(img, 0, 0);
+      const W2P = (v) => (v / SZ + 0.5) * GT;
+      gx.strokeStyle = 'rgb(124,122,118)'; gx.lineWidth = 2.4;
+      AVES.forEach((a) => { gx.beginPath(); gx.moveTo(W2P(a[0]), W2P(a[1])); gx.lineTo(W2P(a[2]), W2P(a[3])); gx.stroke(); });
+      const tg = new THREE.PlaneGeometry(SZ, SZ, 180, 180); tg.rotateX(-Math.PI / 2);
+      { const p = tg.attributes.position; for (let k = 0; k < p.count; k++){ p.setY(k, hgt(p.getX(k), p.getZ(k))); if ((k & 4095) === 4095) yield; } tg.computeVertexNormals(); }
+      yield;
+      dio.add(new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ map: canvasTex(gcv, true) })));
+
+      const dm = new THREE.Object3D(), col = new THREE.Color(), unit = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+      const setC = (mesh, k, rgb, s) => { col.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255).convertSRGBToLinear().multiplyScalar(s); mesh.setColorAt(k, col); };
+      // the city seen from above: a fine carpet of roofs, streets and parks laid over the savanna (about 5 m a pixel)
+      const CX0 = -260, CX1 = 260, CZ0 = -56, CZ1 = -246, CW = 1024, CH = 384, BLK = 8;
+      const ccv = makeCanvas(CW, CH), cx2 = ccv.getContext('2d'), cimg = cx2.createImageData(CW, CH), c8 = cimg.data;
+      for (let j = 0; j < CH; j++){
+        if ((j & 7) === 7) yield;
+        const z = CZ1 + (CZ0 - CZ1) * (j + 0.5) / CH;
+        let pk = 0;
+        for (let i = 0; i < CW; i++){
+          const x = CX0 + (CX1 - CX0) * (i + 0.5) / CW, o = (j * CW + i) * 4, li = i >> 1, lj = j >> 1;
+          if ((i & 7) === 0) pk = pnoise2(i / 44, j / 44, 64, 64, 21);
+          const street = ((i + ((j / 37) | 0) * 3) % BLK === 0) || (j % BLK === 0);   // the grid shifts a little from one neighbourhood to the next
+          const old = smooth(25, -25, x) * smooth(-140, -70, z), north = smooth(40, 90, x);
+          let c = ROOF[(hash2i(li, lj, 77) * ROOF.length) | 0];
+          if (hash2i(li, lj, 5) < 0.6 * old) c = ROOF[(hash2i(li, lj, 6) * 3) | 0];   // La Candelaria: red tile everywhere
+          else if (hash2i(li, lj, 8) < 0.45 * north) c = ROOF[3 + ((hash2i(li, lj, 9) * 3) | 0)];   // the north: concrete and white
+          const sh = 0.7 + 0.45 * hash2i(i, j, 11);
+          let r = c[0] * sh, g = c[1] * sh, b = c[2] * sh;
+          if (street){ r = 92; g = 90; b = 92; }
+          if (pk > 0.79){ r = 64 + 24 * sh; g = 100 + 26 * sh; b = 54; }   // parks
+          c8[o] = r; c8[o + 1] = g; c8[o + 2] = b; c8[o + 3] = 255;
+        }
+      }
+      cx2.putImageData(cimg, 0, 0);
+      const C2X = (x) => (x - CX0) / (CX1 - CX0) * CW, C2Y = (z) => (z - CZ1) / (CZ0 - CZ1) * CH;
+      cx2.strokeStyle = 'rgb(128,126,122)'; cx2.lineWidth = 4;
+      AVES.forEach((a) => { cx2.beginPath(); cx2.moveTo(C2X(a[0]), C2Y(a[1])); cx2.lineTo(C2X(a[2]), C2Y(a[3])); cx2.stroke(); });
+      dio.add(new THREE.Mesh(new THREE.PlaneGeometry(CX1 - CX0, CZ0 - CZ1).rotateX(-Math.PI / 2).translate((CX0 + CX1) / 2, PL + 0.04, (CZ0 + CZ1) / 2),
+        new THREE.MeshLambertMaterial({ map: canvasTex(ccv, true), polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+      // up close, the houses rise off the carpet: small, packed, low; taller around the centre
+      const NH = 9000, houses = new THREE.InstancedMesh(unit, new THREE.MeshLambertMaterial(), NH);
+      let nh = 0;
+      yield;
+      for (let tries = 0; nh < NH && tries < NH * 4; tries++){
+        if (tries % 1000 === 999) yield;
+        const x = -110 + rnd() * 280, z = -58 - Math.pow(rnd(), 1.3) * 95;
+        const ci = C2X(x), cj = C2Y(z);
+        if (((ci | 0) + ((cj / 37) | 0) * 3) % BLK < 1.5 || (cj | 0) % BLK < 1.5) continue;   // off the streets
+        const h0 = hgt(x, z); if (h0 > PL + 2.5 || AVES.some((a) => dSeg(x, z, a) < 1.8)) continue;
+        const down = Math.exp(-((x - 25) * (x - 25)) / 900 - ((z + 80) * (z + 80)) / 500), old = smooth(25, -25, x) * smooth(-140, -70, z);
+        dm.position.set(x, Math.max(PL, h0) - 0.08, z); dm.rotation.set(0, (rnd() - 0.5) * 0.08, 0);
+        dm.scale.set(0.55 + rnd() * 0.7, 0.25 + rnd() * 0.55 + down * rnd() * 3 + (rnd() < 0.05 ? 1 + rnd() * 2 : 0), 0.55 + rnd() * 0.7);
+        dm.updateMatrix(); houses.setMatrixAt(nh, dm.matrix); setC(houses, nh, ROOF[rnd() < old * 0.7 ? (rnd() * 3) | 0 : [0, 0, 1, 1, 2, 2, 3, 3, 4, 5][(rnd() * 10) | 0]], 0.75 + 0.3 * rnd()); nh++;
+      }
+      houses.count = nh; dio.add(houses);
+      // the towers of the centre, at the foot of the hill: Colpatria, the twin BD Bacatá, Torres del Parque, Atrio
+      const winC = makeCanvas(64, 256), wg = winC.getContext('2d');
+      wg.fillStyle = '#9fb2c4'; wg.fillRect(0, 0, 64, 256);
+      for (let y = 0; y < 256; y += 8){ wg.fillStyle = 'rgba(28,36,50,0.55)'; wg.fillRect(0, y + 5, 64, 3); }
+      for (let x = 0; x < 64; x += 8){ wg.fillStyle = 'rgba(28,36,50,0.35)'; wg.fillRect(x, 0, 1.5, 256); }
+      { const gr = wg.createLinearGradient(0, 0, 64, 256); gr.addColorStop(0, 'rgba(255,255,255,0.28)'); gr.addColorStop(0.5, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(255,214,170,0.22)'); wg.fillStyle = gr; wg.fillRect(0, 0, 64, 256); }
+      const NT = 72, towers = new THREE.InstancedMesh(unit, new THREE.MeshLambertMaterial({ map: canvasTex(winC, true) }), NT);
+      const TW = [[14, -68, 2.4, 2.0, 19.6, [96, 130, 170]], [25.2, -72, 1.7, 1.7, 26, [92, 98, 110]], [27.6, -72.6, 1.7, 1.7, 24, [92, 98, 110]],
+        [6, -64, 2.2, 2.2, 9, [150, 70, 48]], [8, -69, 2.0, 2.0, 11, [150, 70, 48]], [36, -80, 2.6, 2.0, 20, [80, 120, 160]], [39.4, -80.6, 2.2, 1.8, 26.8, [80, 120, 160]]];
+      while (TW.length < NT){
+        const zone = rnd(), x = zone < 0.55 ? 16 + (rnd() + rnd() - 1) * 26 : zone < 0.8 ? 40 + (rnd() + rnd() - 1) * 14 : 88 + (rnd() + rnd() - 1) * 44;
+        const z = zone < 0.55 ? -75 + (rnd() + rnd() - 1) * 13 : zone < 0.8 ? -86 + (rnd() + rnd() - 1) * 10 : -84 + (rnd() + rnd() - 1) * 18;
+        if (z > -62 || (x < 10 && z > -67) || hgt(x, z) > PL + 2 || TW.some((q) => Math.abs(q[0] - x) < 3.2 && Math.abs(q[1] - z) < 3.2) || AVES.some((a) => dSeg(x, z, a) < 2.2)) continue;
+        const pal = [[110, 140, 172], [140, 150, 160], [168, 120, 96], [120, 128, 140], [186, 176, 160], [150, 80, 60]][(rnd() * 6) | 0], tall = Math.pow(rnd(), 2.4);
+        TW.push([x, z, 1.3 + rnd() * 1.4, 1.3 + rnd() * 1.4, (zone < 0.8 ? 3 : 2.5) + tall * (zone < 0.8 ? 15 : 8), pal]);
+      }
+      TW.forEach((q, k) => { dm.position.set(q[0], hgt(q[0], q[1]) - 0.2, q[1]); dm.rotation.set(0, (rnd() - 0.5) * 0.1, 0); dm.scale.set(q[2], q[4], q[3]); dm.updateMatrix(); towers.setMatrixAt(k, dm.matrix); setC(towers, k, q[5], 1); });
+      dio.add(towers);
+      // the forest of the hills: eucalyptus and pine, thickest around the sanctuary
+      const NTR = 4200, trees = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial(), NTR);
+      const GREENS = [[38, 62, 34], [52, 80, 40], [66, 94, 46], [34, 54, 38], [80, 100, 50], [96, 108, 60]];
+      let nt = 0;
+      yield;
+      for (let tries = 0; nt < NTR && tries < NTR * 6; tries++){
+        if (tries % 1000 === 999) yield;
+        const close = rnd() < 0.6, a = rnd() * 6.283, rr = 5.6 + Math.pow(rnd(), 1.5) * 34;
+        const x = close ? Math.cos(a) * rr : (rnd() - 0.5) * 240, z = close ? Math.sin(a) * rr - 0.5 : -64 + rnd() * 110, h0 = hgt(x, z);
+        if (h0 < PL + 1.5 || (x > -7.8 && x < 4.6 && z > -6.8 && z < 7.6)) continue;   // not on the city, the sanctuary or the plaza
+        const s = 0.32 + rnd() * 0.5;
+        dm.position.set(x, h0 + s * 1.2, z); dm.rotation.set(rnd() * 0.3, rnd() * 6.28, 0); dm.scale.set(s * (0.8 + rnd() * 0.5), s * (1.3 + rnd() * 0.8), s * (0.8 + rnd() * 0.5));
+        dm.updateMatrix(); trees.setMatrixAt(nt, dm.matrix); setC(trees, nt, GREENS[(rnd() * GREENS.length) | 0], 0.75 + 0.4 * rnd()); nt++;
+      }
+      trees.count = nt; dio.add(trees);
+
+      yield;
+      /* the sanctuary: nave from the round apse (east, +Z) to the bell tower (west, -Z), a lower wing with an arcade on the
+         plaza side, red tile everywhere */
+      const san = new THREE.Group(); dio.add(san);
+      const white = new THREE.MeshLambertMaterial({ color: C('#f4f0e7') }), stone = new THREE.MeshLambertMaterial({ color: C('#7d776e') });
+      const redT = new THREE.MeshLambertMaterial({ color: C('#a63f28') }), dark = new THREE.MeshLambertMaterial({ color: C('#4e2a20') });
+      const winRed = new THREE.MeshLambertMaterial({ color: C('#8a2618') }), ochre = new THREE.MeshLambertMaterial({ color: C('#d9b66e') });
+      const tileC = makeCanvas(128, 128), tc = tileC.getContext('2d');
+      tc.fillStyle = '#b4502f'; tc.fillRect(0, 0, 128, 128);
+      for (let y = 0; y < 128; y += 8){ for (let x = ((y / 8) % 2) * 6 - 6; x < 128; x += 12){ const v = rnd(); tc.fillStyle = 'rgba(' + (130 + v * 70 | 0) + ',' + (48 + v * 34 | 0) + ',' + (28 + v * 18 | 0) + ',0.6)'; tc.fillRect(x, y, 11, 7); } tc.fillStyle = 'rgba(60,20,10,0.5)'; tc.fillRect(0, y + 7, 128, 1); }
+      const tileTex = (rx, ry) => { const t = canvasTex(tileC, true); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); return t; };
+      const roofLong = new THREE.MeshLambertMaterial({ map: tileTex(2, 9) }), roofRound = new THREE.MeshLambertMaterial({ map: tileTex(14, 2), side: THREE.DoubleSide });
+      const drumC = makeCanvas(256, 64), dc = drumC.getContext('2d');
+      dc.fillStyle = '#f4f0e7'; dc.fillRect(0, 0, 256, 64);
+      for (let x = 4; x < 256; x += 16){ dc.fillStyle = '#4a3328'; dc.beginPath(); dc.moveTo(x, 50); dc.lineTo(x, 26); dc.arc(x + 4, 26, 4, Math.PI, 0); dc.lineTo(x + 8, 50); dc.fill(); }
+      const drumM = new THREE.MeshLambertMaterial({ map: canvasTex(drumC, true) });
+      const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); san.add(m); return m; };
+      const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+      add(B(9.6, 1.6, 11.6), stone, -1.4, -0.79, 0.5);   // the stone terrace of the summit
+      const paveC = makeCanvas(64, 64), pc = paveC.getContext('2d'); pc.fillStyle = '#b0644a'; pc.fillRect(0, 0, 64, 64);
+      for (let y = 0; y < 64; y += 4) for (let x = (y % 8) ? 0 : 3; x < 64; x += 6){ pc.fillStyle = 'rgba(' + (120 + rnd() * 60 | 0) + ',60,44,0.5)'; pc.fillRect(x, y, 5, 3); }
+      const paveT = canvasTex(paveC, true); paveT.wrapS = paveT.wrapT = THREE.RepeatWrapping; paveT.repeat.set(5, 9);
+      add(B(4.6, 0.06, 10), new THREE.MeshLambertMaterial({ map: paveT }), -4.1, 0.04, 0.6);   // the plaza
+      // nave and its gabled roof
+      add(B(2.0, 1.6, 5.8), white, 0, 0.8, -0.1);
+      const RA = Math.atan2(0.72, 1.22), RL = Math.hypot(1.22, 0.72);
+      add(B(RL, 0.07, 6.1), roofLong, -0.61, 1.6 + 0.36, -0.1, 0, 0, RA); add(B(RL, 0.07, 6.1), roofLong, 0.61, 1.6 + 0.36, -0.1, 0, 0, -RA);
+      const gable = new THREE.Shape(); gable.moveTo(-1.0, 0); gable.lineTo(1.0, 0); gable.lineTo(0, 0.68); gable.closePath();
+      add(new THREE.ShapeGeometry(gable), white, 0, 1.6, -2.99, 0, Math.PI, 0); add(new THREE.ShapeGeometry(gable), white, 0, 1.6, 2.79);
+      // the lower wings, with the arcade on the plaza side
+      [-1, 1].forEach((sd) => {
+        add(B(1.3, 1.05, 4.9), white, sd * 1.65, 0.53, -0.25);
+        add(B(1.55, 0.06, 5.1), roofLong, sd * 1.7, 1.13, -0.25, 0, 0, -sd * 0.24);
+        for (let k = 0; k < 6; k++){ const z = -2.3 + k * 0.85; add(B(0.04, 0.3, 0.22), ochre, sd * 1.01, 1.36, z); add(B(0.05, 0.22, 0.14), dark, sd * 1.01, 1.36, z); }   // clerestory windows
+      });
+      for (let k = 0; k < 5; k++){ const z = -2.2 + k * 0.95; add(B(0.05, 0.58, 0.5), dark, -2.29, 0.31, z); add(new THREE.CylinderGeometry(0.25, 0.25, 0.05, 12, 1, false, 0, Math.PI), dark, -2.29, 0.6, z, 0, 0, Math.PI / 2); }   // the arches
+      for (let k = 0; k < 5; k++){ const z = -2.1 + k * 0.95; add(B(0.04, 0.32, 0.26), ochre, 2.31, 0.55, z); add(B(0.05, 0.24, 0.17), winRed, 2.31, 0.55, z); }
+      add(B(0.05, 0.5, 0.36), new THREE.MeshLambertMaterial({ color: C('#8a5a34') }), -2.31, 0.27, 2.0);   // the wooden door
+      // the round apse, its tile cone and the little drum with its ring of arched windows
+      const AR = 2.35;
+      add(new THREE.CylinderGeometry(AR, AR, 1.3, 48, 1, true, -Math.PI / 2, Math.PI), white, 0, 0.65, 2.8);
+      add(B(2 * AR, 1.3, 0.05), white, 0, 0.65, 2.8);
+      add(new THREE.ConeGeometry(AR + 0.18, 0.95, 48, 1, true, -Math.PI / 2, Math.PI), roofRound, 0, 1.3 + 0.47, 2.8);
+      add(new THREE.CylinderGeometry(0.95, 0.95, 0.45, 32, 1, true, -Math.PI / 2, Math.PI), drumM, 0, 2.05, 2.45);
+      add(new THREE.ConeGeometry(1.05, 0.36, 32, 1, true, -Math.PI / 2, Math.PI), roofRound, 0, 2.27 + 0.18, 2.45);
+      // the bell tower: white shaft, red bands, arched openings, a pointed spire and its cross
+      const TZ = -3.5;
+      add(B(0.95, 3.5, 0.95), white, 0, 1.75, TZ);
+      [[1.0, 3.5], [0.86, 4.27], [0.68, 4.86]].forEach(([s, y]) => add(B(s, 0.08, s), redT, 0, y, TZ));
+      add(B(0.8, 0.74, 0.8), white, 0, 3.88, TZ); add(B(0.3, 0.42, 0.82), dark, 0, 3.86, TZ); add(B(0.82, 0.42, 0.3), dark, 0, 3.86, TZ);
+      add(B(0.62, 0.55, 0.62), white, 0, 4.56, TZ); add(B(0.2, 0.26, 0.64), winRed, 0, 4.57, TZ); add(B(0.64, 0.26, 0.2), winRed, 0, 4.57, TZ);
+      add(new THREE.ConeGeometry(0.46, 1.15, 4), white, 0, 4.9 + 0.575, TZ, 0, Math.PI / 4, 0);
+      add(B(0.035, 0.34, 0.035), dark, 0, 6.2, TZ); add(B(0.18, 0.035, 0.035), dark, 0, 6.25, TZ);
+      [1.2, 2.4].forEach((y) => { add(B(0.22, 0.34, 0.97), winRed, 0, y, TZ); add(B(0.97, 0.34, 0.22), winRed, 0, y, TZ); });
+      add(B(0.36, 0.6, 0.04), new THREE.MeshLambertMaterial({ color: C('#8a5a34') }), 0, 0.3, TZ - 0.49);
+      yield;
+      // the flag on the roof
+      const flC = makeCanvas(48, 32), fc = flC.getContext('2d'); fc.fillStyle = '#fcd116'; fc.fillRect(0, 0, 48, 16); fc.fillStyle = '#003893'; fc.fillRect(0, 16, 48, 8); fc.fillStyle = '#ce1126'; fc.fillRect(0, 24, 48, 8);
+      add(B(0.025, 0.7, 0.025), dark, 0.75, 2.25, -2.55);
+      const flag = add(new THREE.PlaneGeometry(0.36, 0.24).translate(0.18, 0, 0), new THREE.MeshLambertMaterial({ map: canvasTex(flC, true), side: THREE.DoubleSide }), 0.76, 2.48, -2.55);
+      // pilgrims on the plaza
+      const NP = 60, people = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.035, 0.045, 0.17, 6).translate(0, 0.085, 0), new THREE.MeshLambertMaterial(), NP);
+      for (let k = 0; k < NP; k++){ dm.position.set(-6.2 + rnd() * 4.0, 0.07, -3.8 + rnd() * 8.6); dm.rotation.set(0, 0, 0); dm.scale.set(1, 0.8 + rnd() * 0.4, 1); dm.updateMatrix(); people.setMatrixAt(k, dm.matrix); setC(people, k, [[40, 40, 52], [120, 40, 40], [60, 70, 100], [200, 190, 170], [30, 30, 30]][(rnd() * 5) | 0], 1); }
+      san.add(people);
+      // the cable car, from its station by the plaza down to the city, with a red cabin riding it
+      add(B(1.4, 0.8, 1.1), white, -5.4, 0.4, 5.2); add(B(1.6, 0.06, 1.3), redT, -5.4, 0.84, 5.2);
+      const cable = new THREE.QuadraticBezierCurve3(V(-5.4, 0.9, 4.6), V(-17, -6, -22), V(-28, PL + 3, -68));
+      dio.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cable.getPoints(40)), new THREE.LineBasicMaterial({ color: C('#3a3a3a') })));
+      const cabin = new THREE.Mesh(B(0.42, 0.34, 0.34), redT); dio.add(cabin);
+      // traffic: yellow taxis, white cars and the red TransMilenio buses on the avenues
+      const NC = 260, cars = new THREE.InstancedMesh(unit, new THREE.MeshLambertMaterial(), NC), CAR = [];
+      for (let k = 0; k < NC; k++){ const bus = rnd() < 0.18, a = bus ? AVES[1 + ((rnd() * 2) | 0)] : AVES[(rnd() * AVES.length) | 0]; CAR.push({ a, s: rnd(), v: (0.004 + rnd() * 0.006) * (rnd() < 0.5 ? 1 : -1), bus, lane: (rnd() < 0.5 ? -1 : 1) * 0.35 }); setC(cars, k, bus ? [196, 30, 34] : rnd() < 0.45 ? [240, 196, 30] : [235, 235, 230], 1.2); }
+      dio.add(cars);
+      yield;
+      // sky: a sunset haze at the horizon, heavy clouds above, the sun breaking through toward the city
+      const skyM = new THREE.ShaderMaterial({
+        uniforms: { uSun: { value: SUN }, uHaze: { value: HAZE }, uT: { value: 0 } }, side: THREE.BackSide, depthWrite: false, fog: false,
+        vertexShader: `varying vec3 vD; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform vec3 uSun, uHaze; uniform float uT; varying vec3 vD;
+          float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+          float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ s += a * noise(p); p *= 2.03; a *= 0.5; } return s; }
+          void main(){
+            vec3 d = normalize(vD); float e = d.y, s = max(dot(d, uSun), 0.0);
+            vec3 col = mix(uHaze * 1.1, vec3(0.09, 0.11, 0.17), smoothstep(-0.02, 0.45, e));
+            col += vec3(1.1, 0.72, 0.4) * pow(s, 8.0) * 0.55 + vec3(3.0, 2.3, 1.5) * pow(s, 500.0);
+            if (e > 0.0){
+              vec2 p = d.xz / (e + 0.12) * 1.1 + vec2(uT * 0.015, 0.0);
+              float c = smoothstep(0.4, 0.76, fbm(p)) * smoothstep(-0.01, 0.07, e);
+              vec3 cc = mix(vec3(0.15, 0.15, 0.18), vec3(1.15, 0.78, 0.5), pow(s, 5.0) * 0.9 + 0.04);
+              col = mix(col, cc, c * 0.93);
+            }
+            col = mix(col, uHaze, smoothstep(0.04, -0.12, e));
+            gl_FragColor = vec4(col, 1.0);
+          }` });
+      dio.add(new THREE.Mesh(new THREE.SphereGeometry(950, 48, 24), skyM));
+      // shafts of light falling from the gaps in the clouds onto the city
+      const rayC = makeCanvas(32, 256), rc = rayC.getContext('2d');
+      { const gv = rc.createLinearGradient(0, 0, 0, 256); gv.addColorStop(0, 'rgba(255,255,255,0)'); gv.addColorStop(0.3, 'rgba(255,255,255,1)'); gv.addColorStop(1, 'rgba(255,255,255,0)'); rc.fillStyle = gv; rc.fillRect(0, 0, 32, 256);
+        rc.globalCompositeOperation = 'destination-in'; const gh = rc.createLinearGradient(0, 0, 32, 0); gh.addColorStop(0, 'rgba(0,0,0,0)'); gh.addColorStop(0.5, 'rgba(0,0,0,1)'); gh.addColorStop(1, 'rgba(0,0,0,0)'); rc.fillStyle = gh; rc.fillRect(0, 0, 32, 256); }
+      const rayT = canvasTex(rayC, true), rays = [];
+      for (let k = 0; k < 7; k++){
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(14 + rnd() * 16, 190), new THREE.MeshBasicMaterial({ map: rayT, color: C('#ffc98a'), transparent: true, opacity: 0.1 + rnd() * 0.1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+        m.position.set(-150 + k * 42 + rnd() * 20, 30, -170 - rnd() * 110); dio.add(m); rays.push({ m, tilt: -0.28 + (rnd() - 0.5) * 0.12 });
+      }
+      /* the drone: high behind the apse (the classic view), over the nave and past the tower, then down the slope into the
+         towers of the centre */
+      const camP = new THREE.CatmullRomCurve3([V(5.5, 7.6, 11.5), V(5, 6.2, 5.5), V(2.5, 4.4, -1.5), V(2.4, 2.6, -10.5), V(4, -16, -33), V(3, -37, -57)]);
+      const camT = new THREE.CatmullRomCurve3([V(0, 0.4, -4.5), V(0, 2.6, -4.5), V(-0.5, 2.5, -40), V(6, -22, -60), V(16, -40, -90), V(24, -40, -100)]);
+      const dcam = new THREE.PerspectiveCamera(52, 1.5, 0.1, 2400), look = new THREE.Vector3();
+      const rt = new THREE.WebGLRenderTarget(1100, 734, { samples: gl2 ? 2 : 0 });   // light on memory: 8-bit colour, a little antialiasing
+      function film(t, k){
+        camP.getPoint(k, dcam.position); camT.getPoint(k, look);
+        dcam.position.x += 0.25 * Math.sin(t * 0.7); dcam.position.y += 0.15 * Math.sin(t * 0.9 + 1);   // a drone never holds perfectly still
+        dcam.lookAt(look); dcam.updateMatrixWorld();
+        skyM.uniforms.uT.value = t;
+        flag.rotation.y = 0.35 * Math.sin(t * 3.1) + 0.15 * Math.sin(t * 7.3);
+        cable.getPoint((t * 0.03) % 1, cabin.position);
+        CAR.forEach((c, k2) => {
+          c.s = (c.s + c.v * 0.033 + 1) % 1; const a = c.a, dx = a[2] - a[0], dz = a[3] - a[1], L2 = Math.hypot(dx, dz);
+          const x = a[0] + dx * c.s - dz / L2 * c.lane, z = a[1] + dz * c.s + dx / L2 * c.lane;
+          dm.position.set(x, hgt(x, z) + 0.02, z); dm.rotation.set(0, Math.atan2(dx, dz), 0); dm.scale.set(c.bus ? 0.26 : 0.18, c.bus ? 0.32 : 0.14, c.bus ? 1.8 : 0.4);
+          dm.updateMatrix(); cars.setMatrixAt(k2, dm.matrix);
+        });
+        cars.instanceMatrix.needsUpdate = true;
+        rays.forEach((r) => { r.m.quaternion.copy(dcam.quaternion); r.m.rotateZ(r.tilt); });
+        const prev = renderer.getRenderTarget();
+        renderer.setRenderTarget(rt); renderer.clear(); renderer.render(dio, dcam); renderer.setRenderTarget(prev);
+      }
+      // the crack: a mask painted on a canvas (black inside, a hot rim around it); the drone's picture shows through it
       const W = 1024, H = 683, L = liveTex(W, H);
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(6, 4), new THREE.MeshBasicMaterial({ map: L.tx, fog: false, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+      const crackM = new THREE.ShaderMaterial({
+        uniforms: { tMask: { value: L.tx }, tDio: { value: rt.texture } }, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform sampler2D tMask, tDio; varying vec2 vUv;
+          void main(){ vec4 m = texture2D(tMask, vUv); vec3 d = texture2D(tDio, vUv).rgb; gl_FragColor = vec4(d * (1.0 - min(m.rgb, vec3(1.0))) + m.rgb * 2.0, m.a); }` });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), crackM);
       const G = newGroup(); G.add(plane);
       let crack = [];
       const halfW = (i, y, w) => w * (95 + 55 * Math.sin(i * 1.7)) * Math.sin(Math.PI * THREE.MathUtils.clamp(y / H, 0.04, 0.96));
-      function draw(lt, w, open, zoom){
+      function drawMask(w, open){
         const g = L.g; g.clearRect(0, 0, W, H);
-        if (w <= 0.001){ L.tx.needsUpdate = true; return; }
-        // the window onto the city drifts from the whole view to the downtown towers
-        const f = easeIO(THREE.MathUtils.clamp((zoom - 1) / 2.4, 0, 1));
-        const cx = lerp(DW / 2, 1060, f), cy = lerp(DH * 0.52, 560, f), sw = DW / zoom, sh = sw * H / W;
-        const sx = cx - sw / 2, sy = cy - sh / 2, k = W / sw;
-        g.save(); g.beginPath();
-        crack.forEach(([x, y], i) => { const hw = lerp(halfW(i, y, w), W, open); if (i) g.lineTo(x - hw, y); else g.moveTo(x - hw, y); });
-        for (let i = crack.length - 1; i >= 0; i--){ const [x, y] = crack[i]; g.lineTo(x + lerp(halfW(i, y, w) * 0.8, W, open), y); }
-        g.closePath(); g.save(); g.clip();
-        g.drawImage(city, sx * SC, sy * SC, sw * SC, sh * SC, 0, 0, W, H);
-        // traffic and blinking lights, mapped through the same window
-        const px = (x) => (x - sx) * k, py = (y) => (y - sy) * k;
-        cars.forEach((c) => {
-          c.k = (c.k + c.v * 0.016 + 1) % 1;
-          const t2 = Math.pow(c.k, 1.9), y = DH - t2 * (DH - HZ - 8), x = c.a + (VPX + (c.a - VPX) * 0.04 - c.a) * t2 + c.side * 3 * (1 - t2);
-          const r = Math.max(0.8, (1.6 - t2 * 1.2) * k * 0.9);
-          g.fillStyle = c.v > 0 ? 'rgba(255,245,220,0.95)' : 'rgba(255,60,50,0.95)'; g.beginPath(); g.arc(px(x), py(y), r, 0, Math.PI * 2); g.fill();
-        });
-        const blink = (lt % 1.4) < 0.5;
-        if (blink){ g.fillStyle = '#ff2a20'; TOWERS.forEach(([x, y]) => { g.beginPath(); g.arc(px(x), py(y - 2), Math.max(1.2, 1.4 * k), 0, Math.PI * 2); g.fill(); }); }
-        // the crown of Colpatria changes colour, as it does at night
-        const hue = (lt * 40) % 360; g.fillStyle = 'hsla(' + hue + ',90%,60%,0.85)';
-        g.fillRect(px(1012), py(650 - 245), 34 * k, 10 * k); g.fillStyle = 'hsla(' + ((hue + 120) % 360) + ',90%,60%,0.6)'; g.fillRect(px(1012), py(650 - 120), 34 * k, 4 * k);
-        g.restore();
-        // a hot, glowing rim on the crack; once it is wide open the picture fades softly at its edges
-        if (open < 0.98){ g.strokeStyle = 'rgba(255,241,214,' + (1 - open) + ')'; g.shadowColor = '#ffb46a'; g.shadowBlur = 24; g.lineWidth = 4; g.stroke(); }
-        g.restore();
-        if (open > 0.02){
-          g.save(); g.globalCompositeOperation = 'destination-in';
-          const m = g.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.62); m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,' + (1 - open) + ')');
-          g.fillStyle = m; g.fillRect(0, 0, W, H); g.restore();
+        if (w > 0.001){
+          g.save(); g.beginPath();
+          crack.forEach(([x, y], i) => { const hw = lerp(halfW(i, y, w), W, open); if (i) g.lineTo(x - hw, y); else g.moveTo(x - hw, y); });
+          for (let i = crack.length - 1; i >= 0; i--){ const [x, y] = crack[i]; g.lineTo(x + lerp(halfW(i, y, w) * 0.8, W, open), y); }
+          g.closePath(); g.fillStyle = '#000'; g.fill();
+          if (open < 0.98){ g.strokeStyle = 'rgba(255,241,214,' + (1 - open) + ')'; g.shadowColor = '#ffb46a'; g.shadowBlur = 24; g.lineWidth = 4; g.stroke(); }
+          g.restore();
+          if (open > 0.02){   // once it is wide open the picture melts softly into the tunnel at its edges
+            g.save(); g.globalCompositeOperation = 'destination-in';
+            const m = g.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.62); m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,' + (1 - open) + ')');
+            g.fillStyle = m; g.fillRect(0, 0, W, H); g.restore();
+          }
         }
         L.tx.needsUpdate = true;
       }
-      const home = new THREE.Vector3(), near = new THREE.Vector3();
+      yield;
+      // its shaders are handed to the driver now, without waiting for them (they finish in parallel, long before the show)
+      { const ce = renderer.debug.checkShaderErrors, kids = dio.children.slice(), lights = kids.filter((o) => o.isLight);   // one piece at a time
+        renderer.debug.checkShaderErrors = false;
+        for (const o of kids){ if (o.isLight) continue; dio.children = lights.concat([o]); renderer.compile(dio, dcam); yield; }
+        dio.children = kids; renderer.debug.checkShaderErrors = ce; }
+      yield;
+      const home = new THREE.Vector3(), near = new THREE.Vector3(), fwd = new THREE.Vector3(), faceQ = new THREE.Quaternion();
       let acc = 0;
       return {
-        start(){
+        start(t){
           crack = []; for (let y = -20; y < H + 20; y += 26 + Math.random() * 34) crack.push([W / 2 + (Math.random() - 0.5) * 80, y]);
-          home.copy(P.anchor); G.position.copy(home); faceCam(G); G.visible = true; draw(0, 0, 0, 1);
+          // the window takes the shape of the screen, so a phone held upright gets an upright view of the city
+          const asp = THREE.MathUtils.clamp(camera.aspect, 0.55, 1.7);
+          plane.scale.set(4 * asp, 4, 1);
+          if (asp < 1) rt.setSize(Math.round(960 * asp), 960); else rt.setSize(1100, Math.round(1100 / asp));
+          dcam.aspect = asp; dcam.fov = asp < 1 ? 68 : 52; dcam.updateProjectionMatrix();
+          home.copy(P.anchor); G.position.copy(home); faceCam(G); G.visible = true; acc = 1;
+          film(t || 0, 0); drawMask(0, 0);
         },
         update(lt, raw, t){
-          const D = 12.5;
-          const w = easeIO(smooth(0.4, 2.2, lt)) * (1 - easeIO(smooth(10.2, 12.0, lt)));
-          const dive = easeIO(smooth(2.4, 7.4, lt)) * (1 - easeIO(smooth(9.0, 11.2, lt)));   // falling toward the city, then pulled back out
-          const open = smooth(0.1, 0.75, dive), zoom = 1 + 2.4 * dive;
-          // the window comes toward you and grows until it fills the view
-          near.copy(camera.position).sub(home).multiplyScalar(0.55).add(home);
-          G.position.lerpVectors(home, near, dive); faceCam(G); G.scale.setScalar(1 + 0.35 * dive);
-          acc += raw; if (acc > 1 / 30){ acc = 0; draw(lt, w, open, zoom); }
-          momentFx.ca += 0.02 * smooth(0.4, 0.8, lt) * (1 - smooth(0.8, 1.6, lt)) + 0.012 * smooth(2.4, 3.2, lt) * (1 - smooth(3.2, 4.5, lt));
-          momentFx.dim -= 0.25 * dive;   // the city light spills into the scene
+          let w = easeIO(smooth(0.4, 2.2, lt)) * (1 - easeIO(smooth(11.2, 12.8, lt)));
+          let dive = easeIO(smooth(2.2, 8.4, lt)) * (1 - easeIO(smooth(9.8, 11.8, lt)));   // down into the city, a moment among the towers, then pulled back out
+          let path = dive; if (this.peek != null){ w = 1; dive = 1; path = this.peek; }   // debug: any point of the flight, full screen
+          const open = smooth(0.08, 0.7, dive);
+          camera.getWorldDirection(fwd);
+          near.copy(camera.position).addScaledVector(fwd, 2.7 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.82);   // close enough to overfill the screen
+          G.position.lerpVectors(home, near, dive); faceCam(G); faceQ.copy(G.quaternion); G.quaternion.copy(faceQ).slerp(camera.quaternion, dive); G.scale.setScalar(1 + 0.35 * dive);
+          acc += raw;
+          if (acc > 1 / 30){ acc = 0; if (w > 0.001) film(t, path); drawMask(w, open); }
+          momentFx.ca += 0.02 * smooth(0.4, 0.8, lt) * (1 - smooth(0.8, 1.6, lt)) + 0.012 * smooth(2.2, 3.0, lt) * (1 - smooth(3.0, 4.3, lt));
+          momentFx.dim -= 0.25 * dive;   // the light of the city spills into the tunnel
         },
         end(){ G.visible = false; }
+      };
+      })();
+      let inst = null;
+      const finish = () => { while (!inst){ const r = job.next(); if (r.done) inst = r.value; } return inst; };
+      return {
+        step(){ if (!inst){ const r = job.next(); if (r.done) inst = r.value; } return !!inst; },
+        start(t){ finish().start(t); },
+        update(lt, raw, t){ inst.peek = this.peek; inst.update(lt, raw, t); },
+        end(){ if (inst) inst.end(); }
       };
     } },
     { name: 'Mensaje en las estrellas', line: 'Las estrellas se ordenan para saludarte: «HOLA».', dur: 9, make(P){
@@ -3591,6 +3798,14 @@ function init(){
     toast(def);
     fireBurst(p); astroReact(def, p);
   }
+  // the heaviest event builds its little world in a quiet moment after the page loads, so it opens instantly
+  const idle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 300 }) : (f) => setTimeout(() => f({ timeRemaining: () => 8 }), 30);
+  setTimeout(() => points.forEach((p) => p.defs.forEach((d) => {
+    if (!d.prewarm || d.inst) return;
+    try { d.inst = d.make(p, d); } catch (err){ console.error(err); return; }
+    const go = (dl) => { try { while (!d.inst.step()){ if (dl.timeRemaining() < 3){ idle(go); return; } } } catch (err){ console.error(err); } };   // a few milliseconds at a time
+    idle(go);
+  })), 3500);
   const GAZE = Math.cos(D2R(9)), NEAR = Math.cos(D2R(16)), DWELL = 0.55;
   let found = 0;
   const cineOn = () => { try { return cine; } catch (err){ return false; } };   // declared further down, with the UI
@@ -3863,7 +4078,7 @@ function init(){
     'Laberinto de luz': (lt) => { momentFx.dim += 0.65 * env(lt, 12.5, 1.2, 1.5); },   // the lights go out so the maze glows alone
     'Estás aquí': (lt) => { momentFx.dim += 0.35 * env(lt, 12, 1, 1.2); },
     'Salida del agujero': (lt, raw, t, p) => { pullTo(p.anchor, 1.2 * smooth(1, 2.5, lt) * (1 - smooth(6, 8, lt))); },   // the other side draws you in
-    'Grieta a la Tierra': () => {}
+    'Grieta a la Tierra': (lt) => { const k = smooth(2.6, 6, lt) * (1 - smooth(10, 12, lt)); tintTo(1.0, 0.82, 0.6, 0.16 * k); }   // the sunset over the city warms the tunnel
   };
   function astroReact(def, p){
     const R = REACT[def.name]; if (!R) return;
