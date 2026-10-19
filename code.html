@@ -83,6 +83,9 @@
     main.screen-container > .content-container { justify-content: flex-end; max-width: 430px; width: 100%; margin: 0 auto; background: none; }
     .screen-container::after { content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: 45dvh; background: linear-gradient(to top, rgba(5,7,13,0.88) 0%, rgba(5,7,13,0.5) 55%, rgba(5,7,13,0) 100%); z-index: -1; pointer-events: none; }
     #nogl[hidden] { display: none; }
+    #gyro-note { position: absolute; left: 16px; right: 16px; top: 16px; max-width: 440px; margin: 0 auto; padding: 12px 14px; border-radius: 14px; background: rgba(10,8,24,0.82); border: 1px solid var(--color-border-subtle); color: var(--color-text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; z-index: 3; }
+    #gyro-note[hidden] { display: none; }
+    #btn-gyro, #btn-pause, #btn-hud, #btn-cine, #speed, #speed-out { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
     #loader.done { visibility: hidden; }
     .content-container .button-wrapper { pointer-events: auto; }
     .text-block { text-shadow: 0 2px 18px rgba(0,0,0,0.7); }
@@ -223,9 +226,10 @@
         <span id="t-ship"></span><span id="t-ext"></span><span id="t-o2"></span><span id="t-resp"></span>
         <div id="perf-row" hidden><span id="t-perf"></span></div>
         <output id="speed-out"></output><input id="speed" type="range" min="0.2" max="2.5" step="0.05" value="1">
-        <button id="btn-pause" type="button"></button><button id="btn-cine" type="button"></button><button id="btn-hud" type="button"></button>
+        <button id="btn-pause" type="button"></button><button id="btn-gyro" type="button" hidden></button><button id="btn-cine" type="button"></button><button id="btn-hud" type="button"></button>
       </div>
       <button id="btn-show" type="button" hidden></button>
+      <p id="gyro-note" role="status" hidden></p>
     </section>
 
   <main class="screen-container">

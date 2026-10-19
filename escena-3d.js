@@ -1049,6 +1049,134 @@ function init(){
     shipLights.plumes.forEach((p) => p.scale.setScalar(fl));
   }
 
+  /* ---------- supernovas flaring out on the walls of the throat ---------- */
+  function spriteTex(size, draw){ const c = makeCanvas(size, size), g = c.getContext('2d'); draw(g, size); return canvasTex(c, true); }
+  // star core with diffraction spikes
+  const novaCoreTex = spriteTex(256, (g, S) => {
+    const h = S / 2;
+    let gr = g.createRadialGradient(h, h, 0, h, h, h);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.06, 'rgba(255,255,255,0.95)'); gr.addColorStop(0.18, 'rgba(255,255,255,0.35)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.06)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < 6; k++){
+      const a = k * Math.PI / 3 + 0.26, len = k % 3 === 0 ? h * 0.98 : h * 0.62;
+      g.save(); g.translate(h, h); g.rotate(a);
+      const lg = g.createLinearGradient(0, 0, len, 0);
+      lg.addColorStop(0, 'rgba(255,255,255,0.85)'); lg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = lg; g.beginPath(); g.moveTo(0, -2.2); g.lineTo(len, 0); g.lineTo(0, 2.2); g.closePath(); g.fill();
+      g.restore();
+    }
+  });
+  // expanding shock shell: a ragged, filamentary ring
+  const novaRingTex = spriteTex(256, (g, S) => {
+    const h = S / 2;
+    const img = g.createImageData(S, S), d = img.data;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++){
+      const dx = (x - h) / h, dy = (y - h) / h, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+      const wob = 0.82 + 0.06 * Math.sin(a * 7 + 1.3) + 0.04 * Math.sin(a * 17 + 0.4) + (fbm3(Math.cos(a) * 2.5, Math.sin(a) * 2.5, r * 3, 4, 71) - 0.5) * 0.16;
+      const band = Math.exp(-Math.pow((r - wob) / 0.055, 2));
+      const fil = 0.55 + 0.45 * Math.pow(Math.abs(Math.sin(a * 23 + fbm3(dx * 4, dy * 4, 1.7, 3, 73) * 9)), 0.6);
+      const inner = r < wob ? Math.exp(-Math.pow((r - wob) / 0.22, 2)) * 0.22 : 0;
+      const v = Math.min(1, band * fil + inner) * (r < 1 ? 1 : 0);
+      const i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.round(v * 255);
+    }
+    g.putImageData(img, 0, 0);
+  });
+  // soft remnant cloud
+  const nebulaTex = spriteTex(256, (g, S) => {
+    const img = g.createImageData(S, S), d = img.data, h = S / 2;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++){
+      const dx = (x - h) / h, dy = (y - h) / h, r = Math.hypot(dx, dy);
+      const n = fbm3(dx * 2.2, dy * 2.2, 3.3, 5, 91);
+      const v = Math.max(0, 1 - r) * Math.max(0, n * 1.6 - 0.35);
+      const i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.round(Math.min(1, v) * 255);
+    }
+    g.putImageData(img, 0, 0);
+  });
+  const sprite = (map, color) => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map, color, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true })); s.renderOrder = 2; return s; };
+
+  const NOVA_TINTS = [[1.0, 0.45, 1.25], [1.25, 0.8, 0.35], [0.4, 0.95, 1.3], [1.3, 0.5, 0.35]];
+  const novas = [];
+  for (let i = 0; i < 4; i++){
+    const g = new THREE.Group(), tint = NOVA_TINTS[i];
+    const neb = sprite(nebulaTex, new THREE.Color(tint[0], tint[1], tint[2]));
+    const ring = sprite(novaRingTex, new THREE.Color(tint[0], tint[1], tint[2]));
+    const core = sprite(novaCoreTex, new THREE.Color(1, 1, 1));
+    neb.material.rotation = rand() * 6; ring.material.rotation = rand() * 6;
+    g.add(neb, ring, core); scene.add(g);
+    novas.push({ g, neb, ring, core, tint, slot: i, born: -rand() * 14 - i * 4, life: 16 + rand() * 8, size: 1 });
+  }
+  function seatNova(n, t){
+    // spread around the throat: up-left, down-right, far deep… never straight ahead of the ship
+    const a = (n.slot + rand() * 0.6) * Math.PI / 2, r = 13 + rand() * 7;   // one per quadrant, out on the walls
+    n.g.position.set(Math.cos(a) * r, Math.sin(a) * r, -38 - rand() * 30);
+    n.born = t; n.life = 16 + rand() * 8; n.size = 0.8 + rand() * 0.6;
+  }
+  novas.forEach((n) => seatNova(n, n.born));
+  function updateNovas(t, dt, fs){
+    for (const n of novas){
+      let age = t - n.born;
+      if (age > n.life){ seatNova(n, t); age = 0; }
+      n.g.position.z += dt * FLOW * fs * 0.04;   // far away: slow parallax
+      const p = Math.max(0, age);
+      const flash = p < 0.35 ? p / 0.35 : Math.exp(-(p - 0.35) * 0.55);   // fast rise, slow decay
+      const fade = Math.min(1, (n.life - p) / 3);                          // gentle exit
+      const tw = 1 + 0.06 * Math.sin(t * 9 + n.life);
+      n.core.scale.setScalar(n.size * (2.2 + 7 * flash) * tw);
+      n.core.material.opacity = Math.min(1, 0.25 + flash) * fade;
+      n.core.material.color.setRGB(1.0 + n.tint[0] * 0.6 * flash, 0.95 + n.tint[1] * 0.4 * flash, 1.0 + n.tint[2] * 0.6 * flash);
+      const shell = 1 - Math.exp(-p * 0.22);
+      n.ring.scale.setScalar(n.size * (1 + 26 * shell));
+      n.ring.material.opacity = Math.min(1, p * 3) * (1 - shell * 0.75) * 0.9 * fade;
+      n.ring.material.rotation += dt * 0.02;
+      n.neb.scale.setScalar(n.size * (6 + 22 * shell));
+      n.neb.material.opacity = Math.min(1, p * 0.5) * 0.55 * fade;
+      n.neb.material.rotation -= dt * 0.01;
+    }
+  }
+
+  /* ---------- tilt and turn the phone to look around ----------
+     The full device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near
+     upright like raw gamma does. Rotation is measured against the pose the phone had when the
+     gyroscope switched on, and that "center" follows the hand very slowly. */
+  const gyro = { on: false, seen: false, base: null, ty: 0, tp: 0, roll: 0, yaw: 0, pitch: 0, rl: 0 };
+  const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _rel = new THREE.Quaternion(), _ze = new THREE.Vector3(0, 0, 1);
+  const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
+  function onTilt(e){
+    if (e.beta == null || e.gamma == null) return;
+    gyro.seen = true;
+    if (!gyro.on) return;
+    const D = Math.PI / 180;
+    const ang = ((screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0)) * D;
+    _de.set(e.beta * D, (e.alpha || 0) * D, -e.gamma * D, 'YXZ');
+    _dq.setFromEuler(_de).multiply(_q1).multiply(_q0.setFromAxisAngle(_ze, -ang));
+    if (!gyro.base){ gyro.base = _dq.clone(); }
+    gyro.base.slerp(_dq, 0.0015);
+    _rel.copy(gyro.base).invert().multiply(_dq);
+    _ge.setFromQuaternion(_rel, 'YXZ');
+    gyro.ty = THREE.MathUtils.clamp(_ge.y, -1.3, 1.3);   // turn left/right
+    gyro.tp = THREE.MathUtils.clamp(_ge.x, -0.9, 0.9);   // tilt up/down
+    gyro.roll = THREE.MathUtils.clamp(_ge.z, -0.6, 0.6);
+  }
+  addEventListener('deviceorientation', onTilt);
+  const _cp = new THREE.Vector3(), _cq = new THREE.Quaternion(), gsph = new THREE.Spherical();
+  function gyroApply(raw){
+    const k = Math.min(1, raw * 9);
+    gyro.yaw += ((gyro.on ? gyro.ty : 0) - gyro.yaw) * k;
+    gyro.pitch += ((gyro.on ? gyro.tp : 0) - gyro.pitch) * k;
+    gyro.rl += ((gyro.on ? gyro.roll : 0) - gyro.rl) * k;
+    _cp.copy(camera.position); _cq.copy(camera.quaternion);
+    if (Math.abs(gyro.yaw) + Math.abs(gyro.pitch) + Math.abs(gyro.rl) < 1e-4) return;
+    // swing the camera around the astronaut (strong), then let the lens look into the turn
+    gsph.setFromVector3(off.copy(camera.position).sub(controls.target));
+    gsph.theta -= gyro.yaw * 1.6;
+    gsph.phi = THREE.MathUtils.clamp(gsph.phi + gyro.pitch * 1.3, 0.3, 2.85);
+    camera.position.copy(controls.target).add(off.setFromSpherical(gsph));
+    camera.lookAt(controls.target);
+    camera.rotateY(gyro.yaw * 0.35); camera.rotateX(gyro.pitch * 0.3); camera.rotateZ(gyro.rl * 0.5);
+  }
+  function gyroRestore(){ camera.position.copy(_cp); camera.quaternion.copy(_cq); }
+
   /* ---------- severed safety tether trailing from the waist ---------- */
   const tether = { mesh: null, anchor: V(-0.205, -0.02, 0.085), hook: new THREE.Group() };
   add(new THREE.TorusGeometry(0.03, 0.006, 10, 32, Math.PI * 1.6), alu, tether.hook, [0, 0, 0.03], [Math.PI / 2, 0, 0]);
@@ -1175,6 +1303,31 @@ function init(){
     if (e.key === ' ' && e.target === document.body){ e.preventDefault(); setPaused(!paused); }
   });
   controls.addEventListener('start', () => { if (cine) setCine(false); });
+  /* gyroscope toggle: Android sends tilt freely, iOS asks once after a tap */
+  const btnGyro = $('btn-gyro'), gyroNote = $('gyro-note');
+  const needsAsk = !!(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function');
+  const touchy = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches) || needsAsk;
+  const fp = document.permissionsPolicy || document.featurePolicy;
+  const policyBlocked = !!(fp && fp.allowsFeature && (!fp.allowsFeature('gyroscope') || !fp.allowsFeature('accelerometer')));
+  let noteTimer = 0;
+  function note(msg){ gyroNote.textContent = msg; gyroNote.hidden = false; clearTimeout(noteTimer); noteTimer = setTimeout(() => { gyroNote.hidden = true; }, 9000); }
+  const BLOCKED = 'El visor donde se abre esta página bloquea los sensores de movimiento. Ábrela en tu propia web (con https) y el giroscopio funcionará.';
+  function setGyro(v){ gyro.on = v; gyro.base = null; btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
+  async function askGyro(fromTap){
+    if (needsAsk){
+      try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted'){ if (fromTap) note('Permiso de movimiento denegado. Actívalo en Ajustes › Safari › Movimiento y orientación.'); return; } }
+      catch (err){ if (fromTap) note(BLOCKED); return; }
+    }
+    setGyro(true);
+    setTimeout(() => { if (gyro.on && !gyro.seen){ setGyro(false); btnGyro.textContent = 'Giroscopio no disponible'; if (fromTap || policyBlocked) note(BLOCKED); } }, 2000);
+  }
+  if (window.DeviceOrientationEvent && touchy){
+    btnGyro.hidden = false;
+    btnGyro.addEventListener('click', () => { if (gyro.on) setGyro(false); else askGyro(true); });
+    if (policyBlocked){ btnGyro.textContent = 'Giroscopio no disponible'; setTimeout(() => note(BLOCKED), 1500); }
+    else if (!needsAsk) askGyro(false);   // Android: on from the start
+    else renderer.domElement.addEventListener('touchend', function once(){ renderer.domElement.removeEventListener('touchend', once); if (!gyro.on) askGyro(true); });
+  }
   if (location.hash.indexOf('rendimiento') >= 0) $('perf-row').hidden = false;
 
   /* ---------- animation loop ---------- */
@@ -1213,6 +1366,7 @@ function init(){
     astro.updateMatrixWorld(true);
     if (dbg.tether) updateTether(tm);
     updateShip(t);
+    updateNovas(t, dt, fs);
 
     pMag.position.set(Math.cos(t * 0.45) * 3.0, Math.sin(t * 0.45) * 3.0, -1.2 + Math.sin(t * 0.41) * 1.0);
     pCyan.position.set(Math.cos(t * 0.45 + Math.PI) * 3.0, Math.sin(t * 0.45 + Math.PI) * 3.0, -0.4 + Math.cos(t * 0.37) * 1.0);
@@ -1261,12 +1415,14 @@ function init(){
     }
 
     renderer.shadowMap.needsUpdate = frame % shadowEvery === 0;
+    gyroApply(raw);
     const shk = reduceMotion ? 0 : 0.009 * fs;
     const sx = (Math.sin(t * 37.1) + Math.sin(t * 23.7)) * shk, sy = (Math.sin(t * 41.3) + Math.sin(t * 19.9)) * shk;
     camera.position.x += sx; camera.position.y += sy; camera.updateMatrixWorld();
     if (composer){ finalPass.uniforms.uTime.value = t; finalPass.uniforms.uSpeed.value = fs; composer.render(); }
     else renderer.render(scene, camera);
     camera.position.x -= sx; camera.position.y -= sy;
+    gyroRestore();
 
     // telemetry
     const vel = 3.2 * fs * (1 + 0.004 * Math.sin(t * 3.7));
