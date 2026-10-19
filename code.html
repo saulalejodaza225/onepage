@@ -85,12 +85,17 @@
     #nogl[hidden] { display: none; }
     #gyro-note { position: absolute; left: 16px; right: 16px; top: 16px; max-width: 440px; margin: 0 auto; padding: 12px 14px; border-radius: 14px; background: rgba(10,8,24,0.82); border: 1px solid var(--color-border-subtle); color: var(--color-text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; z-index: 3; }
     #gyro-note[hidden] { display: none; }
-    #moments-hud { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); z-index: 3; display: block; max-width: calc(100% - 32px); padding: 7px 14px; border-radius: 16px; background: rgba(5,7,13,0.55); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; line-height: 1.4; color: var(--color-text-muted); white-space: normal; text-align: center; width: max-content; pointer-events: none; }
+    #moments-hud { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; transform: none; z-index: 3; display: block; max-width: calc(100% - 156px); padding: 7px 14px; border-radius: 16px; background: rgba(5,7,13,0.55); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; line-height: 1.4; color: var(--color-text-muted); white-space: normal; text-align: center; width: max-content; pointer-events: none; }
     #moments-hud .dot { display: inline-block; vertical-align: middle; margin: -2px 6px 0 0; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent-cyan); box-shadow: 0 0 8px var(--color-accent-cyan); animation: momentsPulse 1.8s ease-in-out infinite; }
     @keyframes momentsPulse { 50% { opacity: 0.3; } }
     #moment-toast { position: absolute; top: calc(52px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; margin: 0 auto; max-width: 340px; z-index: 3; padding: 8px 14px; border-radius: 14px; background: rgba(10,8,24,0.8); border: 1px solid rgba(92,225,255,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-align: center; pointer-events: none; opacity: 0; transform: translateY(-8px); transition: opacity 0.35s ease, transform 0.35s ease; }
     #moment-toast.show { opacity: 1; transform: none; }
     #moment-toast[hidden] { display: none; }
+    #btn-estabilizar { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; z-index: 4; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--color-border-subtle); background: rgba(5,7,13,0.6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: var(--color-text-main); font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; cursor: pointer; pointer-events: auto; transition: border-color 0.2s, background 0.2s; touch-action: manipulation; }
+    #btn-estabilizar:hover { border-color: var(--color-accent-cyan); background: rgba(92,225,255,0.08); }
+    #btn-estabilizar:active { transform: scale(0.97); }
+    #btn-estabilizar:focus-visible { outline: 2px solid var(--color-accent-cyan); outline-offset: 2px; }
+    #btn-estabilizar svg { width: 16px; height: 16px; flex: none; }
     #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 2px; }
     #moment-toast span { font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-text-main); }
     @media (prefers-reduced-motion: reduce) { #moments-hud .dot { animation: none; } }
@@ -273,6 +278,10 @@
       <p id="gyro-note" role="status" hidden></p>
       <div id="moments-hud"><span class="dot" aria-hidden="true"></span>Hay momentos ocultos · <span id="moments-hint">gira tu celular</span></div>
       <div id="moment-toast" role="status" hidden><strong></strong><span></span></div>
+      <button id="btn-estabilizar" type="button" aria-label="Estabilizar la cámara y recuperar el control">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Estabilizar
+      </button>
     </section>
 
   <main class="screen-container">

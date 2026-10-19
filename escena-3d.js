@@ -1322,37 +1322,66 @@ function init(){
 
   /* ===== group 1 · time ===== */
   const TIME = [
-    { name: 'Eco temporal', line: 'Tu yo de hace unos segundos aparece a tu lado… y se rebobina.', dur: 8.5, make(P){
-      const { c: ghost, dst } = cloneClean(astro);
-      const mat = new THREE.ShaderMaterial({
-        uniforms: { uFade: { value: 0 }, uTime: { value: 0 } }, transparent: true, depthWrite: false, vertexShader: FRES_VS,
-        fragmentShader: `uniform float uFade, uTime; varying vec3 vN; varying vec3 vV;
-          void main(){
-            float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-            float scan = 0.7 + 0.3 * sin(gl_FragCoord.y * 0.9 - uTime * 24.0);
-            vec3 rim = vec3(0.55, 1.6, 2.6) * (0.4 + 2.8 * f * f) * scan;
-            vec3 c = mix(vec3(0.02, 0.05, 0.13), rim, 0.2 + 0.8 * smoothstep(0.0, 0.9, f));
-            gl_FragColor = vec4(c, uFade * (0.6 + 0.4 * f));
-          }` });
-      ghost.traverse((o) => { if (o.isMesh){ o.material = mat; o.castShadow = false; o.receiveShadow = false; } });
-      ghost.visible = false; ghost.scale.setScalar(1.6); scene.add(ghost);
-      const halo = darkHalo(6); halo.visible = false; scene.add(halo);   // a dark patch behind the hologram so it stands out from the bright gas
-      const rings = [0, 1].map(() => { const r = sprite(novaRingTex, HC(0.6, 1.6, 2.4)); r.visible = false; scene.add(r); return r; });
-      const base = at(P, 0, -0.4, -3.0), D = 8.5;
+    { name: 'Eco temporal', line: 'Se abre una grieta en el tiempo y salen tus ecos de hace unos segundos… hasta que el tiempo los reclama.', dur: 10, make(P){
+      // the rift: a clock-like portal with turning ticks and a swirl inside
+      const portal = newGroup();
+      portal.add(new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.05, 12, 128), lit(HC(0.8, 1.8, 2.6))));
+      portal.add(new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.018, 8, 128), lit(HC(0.6, 1.2, 2.2))));
+      const ticks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.16, 0.02), lit(HC(1.4, 2.0, 2.6)), 60); const dm = new THREE.Object3D();
+      for (let i = 0; i < 60; i++){ const a = i / 60 * Math.PI * 2; dm.position.set(Math.cos(a) * 1.45, Math.sin(a) * 1.45, 0); dm.rotation.set(0, 0, a + Math.PI / 2); dm.scale.set(1, i % 5 ? 1 : 1.8, 1); dm.updateMatrix(); ticks.setMatrixAt(i, dm.matrix); }
+      const tickRing = new THREE.Group(); tickRing.add(ticks); portal.add(tickRing);
+      const swirl = []; for (let i = 0; i < 3; i++){ const s = sprite(nebulaTex, new THREE.Color().setHSL(0.55 + i * 0.08, 0.8, 0.5).multiplyScalar(1.4)); s.scale.setScalar(3.2 - i * 0.5); portal.add(s); swirl.push(s); }
+      const core = sprite(novaCoreTex, HC(1.6, 2.2, 2.6)); core.scale.setScalar(1.4); portal.add(core);
+      const shock = sprite(novaRingTex, HC(1.0, 1.8, 2.6)); shock.visible = false; scene.add(shock);
+      // three echoes of the astronaut, each further back in time: cyan, blue, violet
+      const COLS = [[0.55, 1.7, 2.6], [0.6, 1.0, 2.6], [1.4, 0.6, 2.6]], DELAY = [1.2, 2.4, 3.6];
+      const echoes = COLS.map((col) => {
+        const { c: ghost, dst } = cloneClean(astro);
+        const mat = new THREE.ShaderMaterial({
+          uniforms: { uFade: { value: 0 }, uTime: { value: 0 }, uRim: { value: new THREE.Color(col[0], col[1], col[2]) } }, transparent: true, depthWrite: false, vertexShader: FRES_VS,
+          fragmentShader: `uniform float uFade, uTime; uniform vec3 uRim; varying vec3 vN; varying vec3 vV;
+            void main(){
+              float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+              float scan = 0.7 + 0.3 * sin(gl_FragCoord.y * 0.9 - uTime * 24.0);
+              vec3 c = mix(vec3(0.02, 0.04, 0.1), uRim * (0.4 + 2.8 * f * f) * scan, 0.2 + 0.8 * smoothstep(0.0, 0.9, f));
+              gl_FragColor = vec4(c, uFade * (0.6 + 0.4 * f));
+            }` });
+        ghost.traverse((o) => { if (o.isMesh){ o.material = mat; o.castShadow = false; o.receiveShadow = false; } });
+        ghost.visible = false; ghost.scale.setScalar(1.3); scene.add(ghost);
+        const halo = darkHalo(4.5); halo.visible = false; scene.add(halo);
+        return { ghost, dst, mat, halo, pos: new THREE.Vector3() };
+      });
+      const trail = pointsOf(150, 0.09, HC(0.9, 1.6, 2.6)); trail.p.visible = false; scene.add(trail.p);   // a stream of light linking the echoes
+      const home = at(P, 0, 0, 1), slots = [at(P, -2.2, -0.6, -2.0), at(P, 0, 0.4, -2.6), at(P, 2.2, -0.4, -2.0)];
       return {
-        start(){ ghost.visible = halo.visible = true; rings.forEach((r) => { r.visible = true; }); },
+        start(){ portal.position.copy(home); faceCam(portal); portal.visible = trail.p.visible = true; echoes.forEach((E) => { E.ghost.visible = E.halo.visible = true; }); shock.visible = true; },
         update(lt, raw, t){
-          const inK = smooth(0, 0.8, lt), outK = 1 - smooth(D - 1.0, D, lt), rew = Math.max(0, lt - (D - 2.0));
-          poseAt(dst, performance.now() / 1000, 2.5 + rew * rew * 1.4);   // the delay grows faster than time: it plays backwards
-          const glitchy = lt < 0.8 || rew > 0, flick = reduceMotion || !glitchy ? 1 : (Math.sin(t * 57) > -0.2 ? 1 : 0.35);
-          mat.uniforms.uFade.value = inK * outK * flick; mat.uniforms.uTime.value = t;
-          ghost.position.copy(base).addScaledVector(P.right, 0.25 * Math.sin(lt * 0.7)).addScaledVector(P.up, 0.2 * Math.sin(lt * 0.9));
-          halo.position.copy(ghost.position).addScaledVector(P.out, 1.4); halo.material.opacity = 0.8 * inK * outK;
-          const r0 = smooth(0, 1.4, lt); rings[0].position.copy(ghost.position); rings[0].scale.setScalar(1 + 8 * r0); rings[0].material.opacity = 1 - r0;
-          const r1 = smooth(D - 1.6, D, lt); rings[1].position.copy(ghost.position); rings[1].scale.setScalar(9 - 8 * r1); rings[1].material.opacity = r1 * (1 - r1) * 3;
-          momentFx.ca += 0.025 * (1 - inK) + 0.03 * Math.min(1, rew);
+          const now = performance.now() / 1000, open = easeIO(smooth(0, 1.0, lt)) * (1 - easeIO(smooth(8.6, 9.3, lt)));
+          portal.scale.setScalar(Math.max(0.001, open)); tickRing.rotation.z -= raw * (0.6 + 4 * smooth(7.0, 8.6, lt));   // the clock runs backwards, faster at the end
+          swirl.forEach((s, i) => { s.material.rotation += raw * (0.4 + i * 0.3) * (i % 2 ? -1 : 1); s.material.opacity = 0.7 * open; });
+          core.material.opacity = open * (0.7 + 0.3 * Math.sin(t * 9));
+          const rewind = smooth(7.0, 8.6, lt);
+          echoes.forEach((E, i) => {
+            // each echo steps out of the rift in turn, and is pulled back in reverse order
+            const out = easeIO(smooth(1.0 + i * 0.5, 2.2 + i * 0.5, lt)) * (1 - easeIO(smooth(7.0 + (2 - i) * 0.4, 8.0 + (2 - i) * 0.4, lt)));
+            E.pos.lerpVectors(home, slots[i], out).addScaledVector(P.up, 0.15 * Math.sin(t * 0.9 + i * 2));
+            E.ghost.position.copy(E.pos); E.ghost.scale.setScalar(1.3 * Math.max(0.05, out));
+            poseAt(E.dst, now, DELAY[i] + rewind * rewind * 4);   // replaying your own moves from seconds ago, then rewinding
+            const glitch = (lt < 2.6 + i * 0.5 || rewind > 0) && !reduceMotion ? (Math.sin(t * 53 + i * 7) > -0.3 ? 1 : 0.3) : 1;
+            E.mat.uniforms.uFade.value = out * glitch; E.mat.uniforms.uTime.value = t;
+            E.halo.position.copy(E.pos).addScaledVector(P.out, 1.3); E.halo.material.opacity = 0.7 * out;
+          });
+          for (let k = 0; k < 150; k++){   // light flowing from the rift through the echoes
+            const f = ((k / 150) + lt * 0.35) % 1, seg = Math.min(2, Math.floor(f * 3)), q = f * 3 - seg;
+            const p0 = seg === 0 ? home : echoes[seg - 1].pos, p1 = echoes[seg].pos;
+            _mp.lerpVectors(p0, p1, q).addScaledVector(P.up, Math.sin(q * Math.PI) * 0.4);
+            trail.pos.set([_mp.x, _mp.y, _mp.z], k * 3);
+          }
+          trail.flush(); trail.mat.opacity = 0.7 * open * (1 - rewind);
+          const sk = smooth(9.1, 9.9, lt); shock.position.copy(home); shock.scale.setScalar(1 + 12 * sk); shock.material.opacity = smooth(9.0, 9.15, lt) * (1 - sk);   // the rift snaps shut
+          momentFx.ca += 0.02 * (1 - smooth(0, 1.0, lt)) + 0.03 * rewind * (1 - smooth(8.6, 9.3, lt)) + 0.05 * smooth(9.0, 9.15, lt) * (1 - sk);
         },
-        end(){ ghost.visible = halo.visible = false; rings.forEach((r) => { r.visible = false; }); }
+        end(){ portal.visible = trail.p.visible = shock.visible = false; echoes.forEach((E) => { E.ghost.visible = E.halo.visible = false; }); }
       };
     } },
     { name: 'Reloj derretido', line: 'Las agujas giran hacia atrás y las horas se escurren.', dur: 8, make(P){
@@ -1607,59 +1636,82 @@ function init(){
         end(){ G.visible = false; }
       };
     } },
-    { name: 'Clon del casco', line: 'Un casco gigante flota a tu lado. En su visor, una premonición: tú, en un flotador, con un cóctel. Todo va a estar bien.', dur: 9.5, make(P){
-      const G = newGroup(), R = 1.3;
-      // the premonition painted on the visor: a sunset beach, and the astronaut relaxing on a float with a cocktail
-      const beach = texOf(1024, 512, (g) => {
-        const sky = g.createLinearGradient(0, 0, 0, 300); sky.addColorStop(0, '#2d5fa8'); sky.addColorStop(0.55, '#f4a259'); sky.addColorStop(1, '#ffd29a'); g.fillStyle = sky; g.fillRect(0, 0, 1024, 300);
-        g.fillStyle = 'rgba(255,255,255,0.35)'; for (let i = 0; i < 5; i++){ g.beginPath(); g.ellipse(120 + i * 210, 70 + (i % 2) * 40, 90, 16, 0, 0, Math.PI * 2); g.fill(); }
-        const sun = g.createRadialGradient(640, 290, 10, 640, 290, 90); sun.addColorStop(0, '#fff6d8'); sun.addColorStop(0.5, '#ffd27a'); sun.addColorStop(1, 'rgba(255,190,90,0)'); g.fillStyle = sun; g.fillRect(540, 190, 200, 120);
-        const sea = g.createLinearGradient(0, 290, 0, 420); sea.addColorStop(0, '#3a8fb5'); sea.addColorStop(1, '#155a7a'); g.fillStyle = sea; g.fillRect(0, 290, 1024, 130);
-        g.strokeStyle = 'rgba(255,230,180,0.6)'; g.lineWidth = 3; for (let i = 0; i < 16; i++){ const y = 300 + i * 7; g.beginPath(); g.moveTo(600 - 30 + Math.random() * 20, y); g.lineTo(680 + Math.random() * 20, y); g.stroke(); }   // the sun's path on the water
-        g.fillStyle = '#f1d39b'; g.beginPath(); g.moveTo(0, 410); g.quadraticCurveTo(512, 390, 1024, 420); g.lineTo(1024, 512); g.lineTo(0, 512); g.fill();
-        g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 4; g.beginPath(); g.moveTo(0, 412); g.quadraticCurveTo(512, 392, 1024, 422); g.stroke();
-        // palms
-        for (const [x, lean] of [[110, -0.15], [930, 0.18]]){
-          g.strokeStyle = '#3b2a1a'; g.lineWidth = 14; g.beginPath(); g.moveTo(x, 470); g.quadraticCurveTo(x + lean * 300, 330, x + lean * 200, 170); g.stroke();
-          g.fillStyle = '#1f4a2a'; for (let i = 0; i < 7; i++){ g.save(); g.translate(x + lean * 200, 170); g.rotate(i * 0.9); g.beginPath(); g.ellipse(60, 0, 70, 14, 0.2, 0, Math.PI * 2); g.fill(); g.restore(); }
-        }
-        // the float: a pink and white ring on the water
-        const fx = 430, fy = 345;
-        g.fillStyle = 'rgba(0,40,60,0.35)'; g.beginPath(); g.ellipse(fx, fy + 22, 120, 22, 0, 0, Math.PI * 2); g.fill();
-        for (let i = 0; i < 12; i++){ g.fillStyle = i % 2 ? '#ffffff' : '#ff6fa8'; g.beginPath(); g.ellipse(fx, fy, 112, 34, 0, i / 12 * Math.PI * 2, (i + 1) / 12 * Math.PI * 2); g.lineTo(fx, fy); g.fill(); }
-        g.fillStyle = '#2b78a0'; g.beginPath(); g.ellipse(fx, fy - 2, 62, 16, 0, 0, Math.PI * 2); g.fill();
-        // the astronaut lying back in it: legs over the ring, one arm raising the cocktail
-        g.fillStyle = '#f2f2f2'; g.strokeStyle = '#c9c9c9'; g.lineWidth = 3;
-        g.beginPath(); g.ellipse(fx - 10, fy - 30, 46, 30, -0.35, 0, Math.PI * 2); g.fill(); g.stroke();   // torso
-        g.fillRect(fx + 30, fy - 34, 80, 22); g.fillRect(fx + 100, fy - 34, 20, 40);   // legs over the ring
-        g.fillStyle = '#c4252d'; g.fillRect(fx + 60, fy - 34, 10, 22);
-        g.fillStyle = '#f2f2f2'; g.beginPath(); g.arc(fx - 52, fy - 64, 30, 0, Math.PI * 2); g.fill(); g.stroke();   // helmet
-        const vis = g.createLinearGradient(fx - 70, fy - 80, fx - 40, fy - 50); vis.addColorStop(0, '#ffe08a'); vis.addColorStop(1, '#c77a1a'); g.fillStyle = vis; g.beginPath(); g.ellipse(fx - 48, fy - 64, 20, 15, -0.3, 0, Math.PI * 2); g.fill();
-        g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.ellipse(fx - 54, fy - 70, 6, 3, -0.3, 0, Math.PI * 2); g.fill();
-        g.fillStyle = '#f2f2f2'; g.save(); g.translate(fx - 20, fy - 48); g.rotate(-1.1); g.fillRect(0, -9, 62, 18); g.restore();   // arm up
-        // the cocktail: glass, orange drink, straw, a little umbrella and a slice of lemon
-        const cx = fx + 4, cy = fy - 120;
-        g.fillStyle = 'rgba(220,240,255,0.7)'; g.beginPath(); g.moveTo(cx - 22, cy); g.lineTo(cx + 22, cy); g.lineTo(cx, cy + 26); g.fill(); g.fillRect(cx - 2, cy + 26, 4, 18); g.fillRect(cx - 12, cy + 42, 24, 4);
-        g.fillStyle = '#ff8a2a'; g.beginPath(); g.moveTo(cx - 17, cy + 5); g.lineTo(cx + 17, cy + 5); g.lineTo(cx, cy + 22); g.fill();
-        g.strokeStyle = '#ff3b6b'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx + 6, cy + 10); g.lineTo(cx + 18, cy - 22); g.stroke();
-        g.fillStyle = '#4ad1ff'; g.beginPath(); g.moveTo(cx - 30, cy - 18); g.quadraticCurveTo(cx - 14, cy - 40, cx + 2, cy - 18); g.fill(); g.strokeStyle = '#7a5a2a'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx - 14, cy - 26); g.lineTo(cx - 8, cy + 2); g.stroke();
-        g.fillStyle = '#ffe14a'; g.beginPath(); g.arc(cx + 20, cy, 7, 0, Math.PI * 2); g.fill();
-        // sunglasses reflected in the visor, for good measure
-        g.fillStyle = '#111'; g.fillRect(fx - 62, fy - 70, 10, 6); g.fillRect(fx - 48, fy - 70, 10, 6); g.fillRect(fx - 52, fy - 69, 4, 2);
-      });
-      G.add(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 48), shell));
-      const visor = new THREE.Mesh(new THREE.SphereGeometry(R * 1.037, 96, 48, VP0, VPL, VT0, VTL), new THREE.MeshPhysicalMaterial({ color: C('#1a1a1f'), metalness: 0.3, roughness: 0.08, clearcoat: 1, emissive: C('#ffffff'), emissiveMap: beach, emissiveIntensity: 0, envMapIntensity: 0.4 }));
-      G.add(visor, new THREE.Mesh(new THREE.SphereGeometry(R * 1.076, 72, 24, 0, Math.PI * 2, 0, VT0 + 0.012), shell));
-      const neck = new THREE.Mesh(new THREE.TorusGeometry(R * 0.75, 0.12, 16, 64).rotateX(Math.PI / 2), alu); neck.position.y = -R * 0.85; G.add(neck);
-      const warm = sprite(dotTex, HC(2.2, 1.4, 0.7)); warm.scale.setScalar(5); warm.position.z = 0.6; G.add(warm);   // the sunset spills out of the visor
+    { name: 'Premonición', line: 'Todo va a estar bien.', dur: 10, make(P){
+      const G = newGroup(), R = 1.25;
+      const helmet = new THREE.Group(); G.add(helmet);
+      helmet.add(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 48, 0, Math.PI * 2, 0.96, Math.PI - 0.96).rotateX(Math.PI / 2), shell));   // the shell, open at the front for the visor
+      const neck = new THREE.Mesh(new THREE.TorusGeometry(R * 0.72, 0.13, 16, 64).rotateX(Math.PI / 2), alu); neck.position.y = -R * 0.86; helmet.add(neck);
+      for (const sd of [-1, 1]){ const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.4, 24).rotateX(Math.PI / 2), shell); lamp.position.set(sd * R * 0.98, 0.25, 0.25); helmet.add(lamp); }
+      // the visor is a round window facing you: gold and mirrored at first, then it shows the premonition
+      const gold = new THREE.Mesh(new THREE.CircleGeometry(R * 0.82, 96), new THREE.MeshPhysicalMaterial({ color: C('#ffcf6a'), metalness: 1, roughness: 0.06, clearcoat: 1, iridescence: 0.6, envMapIntensity: 1.8 }));
+      gold.position.z = R * 0.70; helmet.add(gold);
+      const L = liveTex(512, 512);
+      const screen = new THREE.Mesh(new THREE.CircleGeometry(R * 0.82, 96), new THREE.MeshBasicMaterial({ map: L.tx, fog: false, transparent: true, opacity: 0 }));
+      screen.position.z = R * 0.705; helmet.add(screen);
+      const rimRing = new THREE.Mesh(new THREE.TorusGeometry(R * 0.83, 0.055, 12, 96), new THREE.MeshPhysicalMaterial({ color: C('#d7a640'), metalness: 1, roughness: 0.2, envMapIntensity: 1.4 })); rimRing.position.z = R * 0.716; helmet.add(rimRing);
+      const shine = new THREE.Mesh(new THREE.CircleGeometry(R * 0.82, 96), addMat(HC(0.5, 0.5, 0.55), texOf(256, 256, (g) => {   // a glassy highlight across the visor
+        const gr = g.createLinearGradient(40, 30, 160, 150); gr.addColorStop(0, 'rgba(255,255,255,0.75)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = gr; g.beginPath(); g.ellipse(95, 80, 70, 30, -0.6, 0, Math.PI * 2); g.fill();
+      }))); shine.position.z = R * 0.712; helmet.add(shine);
+      const warm = sprite(dotTex, HC(2.0, 1.2, 0.6)); warm.scale.setScalar(7); warm.position.z = 0.4; helmet.add(warm);
+      // the premonition, animated: a calm sea at sunset, and the astronaut floating in a ring with a cocktail
+      function draw(lt){
+        const g = L.g, S = 512;
+        const sky = g.createLinearGradient(0, 0, 0, 300); sky.addColorStop(0, '#1d3f88'); sky.addColorStop(0.5, '#ef8a5a'); sky.addColorStop(1, '#ffcf8f'); g.fillStyle = sky; g.fillRect(0, 0, S, 300);
+        const sun = g.createRadialGradient(330, 285, 6, 330, 285, 110); sun.addColorStop(0, '#fff7dc'); sun.addColorStop(0.35, '#ffd27a'); sun.addColorStop(1, 'rgba(255,170,90,0)'); g.fillStyle = sun; g.fillRect(200, 160, 260, 140);
+        g.strokeStyle = 'rgba(40,30,60,0.7)'; g.lineWidth = 3;   // two gulls
+        for (let k = 0; k < 2; k++){ const x = (lt * 30 + k * 160) % 600 - 40, y = 90 + k * 30 + Math.sin(lt * 2 + k) * 6, w = Math.sin(lt * 6 + k) * 4; g.beginPath(); g.moveTo(x - 14, y - w); g.quadraticCurveTo(x - 6, y - 8, x, y); g.quadraticCurveTo(x + 6, y - 8, x + 14, y - w); g.stroke(); }
+        const sea = g.createLinearGradient(0, 290, 0, S); sea.addColorStop(0, '#3a8fb5'); sea.addColorStop(1, '#0d4c6c'); g.fillStyle = sea; g.fillRect(0, 290, S, S - 290);
+        for (let i = 0; i < 18; i++){ const y = 300 + i * 9, w = 60 - i * 2, x = 330 - w / 2 + Math.sin(lt * 3 + i) * 8; g.fillStyle = 'rgba(255,230,170,' + (0.75 - i * 0.035) + ')'; g.fillRect(x, y, w * (0.6 + 0.4 * Math.sin(lt * 5 + i * 2)), 2); }   // the sun's glitter
+        g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 2; for (let i = 0; i < 9; i++){ const y = 320 + i * 22; g.beginPath(); for (let x = 0; x <= S; x += 16) g.lineTo(x, y + Math.sin(x * 0.03 + lt * 2 + i) * 3); g.stroke(); }
+        g.fillStyle = '#10241a'; g.beginPath(); g.moveTo(0, 300); g.quadraticCurveTo(40, 270, 90, 300); g.fill();   // a little island with a palm
+        g.strokeStyle = '#10241a'; g.lineWidth = 6; g.beginPath(); g.moveTo(45, 290); g.quadraticCurveTo(60, 230, 50, 190); g.stroke();
+        g.fillStyle = '#10241a'; for (let i = 0; i < 6; i++){ g.save(); g.translate(50, 190); g.rotate(i * 1.05 + Math.sin(lt) * 0.05); g.beginPath(); g.ellipse(30, 0, 34, 7, 0.2, 0, Math.PI * 2); g.fill(); g.restore(); }
+        // the float, bobbing
+        const bob = Math.sin(lt * 1.8) * 6, fx = 230, fy = 400 + bob;
+        g.fillStyle = 'rgba(0,30,50,0.4)'; g.beginPath(); g.ellipse(fx, fy + 26, 130, 22, 0, 0, Math.PI * 2); g.fill();
+        for (let i = 0; i < 12; i++){ g.fillStyle = i % 2 ? '#ffffff' : '#ff5f9e'; g.beginPath(); g.moveTo(fx, fy); g.ellipse(fx, fy, 124, 40, 0, i / 12 * Math.PI * 2, (i + 1) / 12 * Math.PI * 2); g.fill(); }
+        g.fillStyle = '#2b78a0'; g.beginPath(); g.ellipse(fx, fy - 2, 70, 19, 0, 0, Math.PI * 2); g.fill();
+        // the astronaut, lying back
+        g.fillStyle = '#f4f4f4'; g.strokeStyle = '#bfc4cc'; g.lineWidth = 3;
+        g.beginPath(); g.ellipse(fx - 10, fy - 36, 56, 36, -0.3, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.save(); g.translate(fx + 34, fy - 40); g.rotate(0.15 + Math.sin(lt * 1.2) * 0.05); g.fillRect(0, -13, 96, 26); g.restore();   // legs over the ring
+        g.fillStyle = '#c4252d'; g.fillRect(fx + 70, fy - 50, 12, 26);
+        g.fillStyle = '#f4f4f4'; g.beginPath(); g.arc(fx - 62, fy - 76, 38, 0, Math.PI * 2); g.fill(); g.stroke();   // helmet
+        const vis = g.createLinearGradient(fx - 84, fy - 96, fx - 40, fy - 56); vis.addColorStop(0, '#ffe39a'); vis.addColorStop(1, '#c47a1a'); g.fillStyle = vis; g.beginPath(); g.ellipse(fx - 56, fy - 76, 25, 19, -0.3, 0, Math.PI * 2); g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.85)'; g.beginPath(); g.ellipse(fx - 64, fy - 84, 8, 4, -0.3, 0, Math.PI * 2); g.fill();
+        // the arm raising the cocktail: a toast, every few seconds
+        const toast = Math.max(0, Math.sin(lt * 1.6)), ang = -1.05 - 0.35 * toast;
+        g.save(); g.translate(fx - 22, fy - 58); g.rotate(ang); g.fillStyle = '#f4f4f4'; g.fillRect(0, -11, 78, 22); g.restore();
+        const hx = fx - 22 + Math.cos(ang) * 82, hy = fy - 58 + Math.sin(ang) * 82;
+        g.fillStyle = 'rgba(220,240,255,0.85)'; g.beginPath(); g.moveTo(hx - 24, hy - 30); g.lineTo(hx + 24, hy - 30); g.lineTo(hx, hy - 2); g.fill(); g.fillRect(hx - 2, hy - 2, 4, 18); g.fillRect(hx - 13, hy + 14, 26, 4);
+        g.fillStyle = '#ff8a2a'; g.beginPath(); g.moveTo(hx - 18, hy - 25); g.lineTo(hx + 18, hy - 25); g.lineTo(hx, hy - 6); g.fill();
+        g.strokeStyle = '#ff3b6b'; g.lineWidth = 3; g.beginPath(); g.moveTo(hx + 6, hy - 20); g.lineTo(hx + 20, hy - 54); g.stroke();
+        g.fillStyle = '#4ad1ff'; g.beginPath(); g.moveTo(hx - 34, hy - 48); g.quadraticCurveTo(hx - 16, hy - 74, hx + 2, hy - 48); g.fill();
+        g.strokeStyle = '#7a5a2a'; g.lineWidth = 2; g.beginPath(); g.moveTo(hx - 16, hy - 58); g.lineTo(hx - 10, hy - 28); g.stroke();
+        g.fillStyle = '#ffe14a'; g.beginPath(); g.arc(hx + 22, hy - 30, 8, 0, Math.PI * 2); g.fill();
+        if (toast > 0.92){ g.fillStyle = 'rgba(255,255,255,0.95)'; for (let k = 0; k < 4; k++){ const a = k * 1.57 + lt * 4; g.fillRect(hx + 30 + Math.cos(a) * 14, hy - 60 + Math.sin(a) * 14, 4, 4); } }   // a little sparkle at the top of the toast
+        // a soft circular vignette
+        const vg = g.createRadialGradient(S / 2, S / 2, S * 0.3, S / 2, S / 2, S * 0.52); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)'); g.fillStyle = vg; g.fillRect(0, 0, S, S);
+        L.tx.needsUpdate = true;
+      }
+      const from = new THREE.Vector3(), home = new THREE.Vector3(), away = new THREE.Vector3(), aim = new THREE.Object3D();
+      let acc = 0;
       return {
-        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        start(){ at(P, -7, 1.5, 3, from); at(P, 0, -0.3, -2.4, home); at(P, 7, 2, 4, away); G.position.copy(from); G.visible = true; draw(0); },
         update(lt, raw, t){
-          const show = smooth(1.2, 2.6, lt) * (1 - smooth(7.4, 8.6, lt));
-          G.scale.setScalar(1.7 * Math.max(0.001, env(lt, 9.5, 1.0, 1.0)));
-          visor.material.emissiveIntensity = 0.85 * show; warm.material.opacity = 0.12 * show;
-          G.rotation.z = 0.05 * Math.sin(t * 0.6);
-          momentFx.tint.setRGB(1.0, 0.75, 0.45); momentFx.tintA = Math.max(momentFx.tintA, 0.18 * show);   // a warm afterglow on everything
+          // it drifts in, turns its visor toward you, shows the premonition, and drifts away
+          const arrive = easeIO(smooth(0, 1.8, lt)), leave = easeIO(smooth(8.4, 10, lt));
+          G.position.lerpVectors(from, home, arrive); if (leave > 0) G.position.lerp(away, leave);
+          G.position.addScaledVector(P.up, 0.12 * Math.sin(t * 0.9));
+          aim.position.copy(G.position); aim.lookAt(camera.position);
+          const turn = easeIO(smooth(1.0, 2.4, lt)) * (1 - easeIO(smooth(8.2, 9.6, lt)));
+          G.quaternion.copy(aim.quaternion); G.rotateY((1 - turn) * 2.4); G.rotateZ(0.06 * Math.sin(t * 0.7));
+          G.scale.setScalar(1.75 * Math.max(0.001, env(lt, 10, 0.8, 0.8)));
+          const show = smooth(2.2, 3.2, lt) * (1 - smooth(7.6, 8.6, lt));
+          screen.material.opacity = show; shine.material.opacity = 0.35 + 0.25 * show; warm.material.opacity = 0.18 * show;
+          acc += raw; if (acc > 1 / 30){ acc = 0; draw(lt); }
+          momentFx.tint.setRGB(1.0, 0.75, 0.45); momentFx.tintA = Math.max(momentFx.tintA, 0.16 * show);   // a warm afterglow over everything
         },
         end(){ G.visible = false; }
       };
@@ -1809,28 +1861,49 @@ function init(){
         end(){ G.visible = false; }
       };
     } },
-    { name: 'Cardumen de cristal', line: 'Peces de vidrio que refractan la luz del agujero.', dur: 9, make(P){
-      const N = 46, geo = new THREE.ConeGeometry(0.09, 0.42, 7).rotateX(Math.PI / 2);   // nose toward +Z
-      const mat = new THREE.MeshPhysicalMaterial({ color: C('#cfefff'), metalness: 0.4, roughness: 0.04, clearcoat: 1, iridescence: 1, iridescenceIOR: 1.6, emissive: C('#3a7cff'), emissiveIntensity: 0.35, envMapIntensity: 2.2, transparent: true, opacity: 0.85 });
-      const fish = new THREE.InstancedMesh(geo, mat, N); fish.visible = false; fish.frustumCulled = false; scene.add(fish);
-      const seeds = []; for (let i = 0; i < N; i++) seeds.push({ o: V(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4), ph: Math.random() * 6.28, sp: 0.8 + Math.random() * 0.5 });
-      const dummy = new THREE.Object3D(), c0 = new THREE.Vector3(), c1 = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3();
-      const centre = (k, out) => out.lerpVectors(a, b, k).addScaledVector(P.up, Math.sin(k * Math.PI * 2) * 1.2);
+    { name: 'Cardumen de cristal', line: 'Un cardumen de peces de vidrio gira en remolino… y estalla como un relámpago.', dur: 11, make(P){
+      // one glass fish: a slim lathe body, a forked tail and a dorsal fin, nose toward +Z
+      const prof = []; for (let i = 0; i <= 18; i++){ const s = i / 18; prof.push(V2(0.001 + 0.105 * Math.sin(Math.PI * Math.pow(s, 0.75)) * (1 - 0.3 * s), s * 0.62 - 0.31)); }
+      const bodyG = new THREE.LatheGeometry(prof, 14).rotateX(-Math.PI / 2); bodyG.scale(0.55, 1, 1);
+      const tail = new THREE.Shape(); tail.moveTo(0, 0); tail.lineTo(0.2, 0.13); tail.lineTo(0.15, 0); tail.lineTo(0.2, -0.13); tail.lineTo(0, 0);
+      const tailG = new THREE.ShapeGeometry(tail).rotateY(Math.PI / 2).translate(0, 0, -0.27);
+      const fin = new THREE.Shape(); fin.moveTo(0, 0); fin.lineTo(-0.12, 0.09); fin.lineTo(-0.16, 0); fin.lineTo(0, 0);
+      const finG = new THREE.ShapeGeometry(fin).rotateY(Math.PI / 2).translate(0, 0.07, 0.02);
+      [bodyG, tailG, finG].forEach((g) => { Object.keys(g.attributes).forEach((k) => { if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k); }); });
+      const fishG = THREE.BufferGeometryUtils.mergeBufferGeometries([bodyG, tailG, finG]) || bodyG;
+      const mat = new THREE.MeshPhysicalMaterial({ color: C('#e4f7ff'), metalness: 0.3, roughness: 0.04, clearcoat: 1, iridescence: 1, iridescenceIOR: 1.55, emissive: C('#2a6bd8'), emissiveIntensity: 0.3, envMapIntensity: 2.6, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+      const N = 150, fish = new THREE.InstancedMesh(fishG, mat, N); fish.visible = false; fish.frustumCulled = false; scene.add(fish);
+      const tint = new THREE.Color();
+      // each fish runs its own tilted orbit around the centre of the ball
+      const F = [];
+      for (let i = 0; i < N; i++){
+        const n = V(Math.random() - 0.5, 1.5 + Math.random(), Math.random() - 0.5).normalize(), u = new THREE.Vector3().crossVectors(n, V(1, 0, 0.3)).normalize(), v = new THREE.Vector3().crossVectors(n, u);
+        F.push({ u, v, r: 0.7 + Math.pow(Math.random(), 0.7) * 1.9, a: Math.random() * 6.28, sp: (0.9 + Math.random() * 0.6) * (Math.random() < 0.85 ? 1 : -1), ph: Math.random() * 6.28, s: 0.8 + Math.random() * 0.5, out: V(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize() });
+        tint.setHSL(0.5 + Math.random() * 0.4, 0.5, 0.75); fish.setColorAt(i, tint);
+      }
+      const dummy = new THREE.Object3D(), c = new THREE.Vector3(), p = new THREE.Vector3(), tg = new THREE.Vector3();
+      const flash = sprite(novaRingTex, HC(1.2, 2.0, 2.6)); flash.visible = false; scene.add(flash);
       return {
-        start(){ at(P, -7, 0.5, 0, a); at(P, 7, -0.5, 0, b); fish.visible = true; },
+        start(){ fish.visible = flash.visible = true; },
         update(lt, raw, t){
-          const k = lt / 9, e = Math.max(0.001, env(lt, 9, 0.8, 1.0));
-          centre(k, c0); centre(Math.min(1, k + 0.01), c1); c1.sub(c0);
-          seeds.forEach((s, i) => {
-            const sw = t * s.sp + s.ph;
-            dummy.position.copy(c0).add(_mv.copy(s.o).applyAxisAngle(P.out, Math.sin(sw * 0.5) * 0.6)).addScaledVector(P.up, Math.sin(sw) * 0.15);
-            dummy.lookAt(_mp.copy(dummy.position).add(c1));
-            dummy.rotateY(Math.sin(sw * 6) * 0.25);   // tail wiggle
-            dummy.scale.setScalar(e); dummy.updateMatrix(); fish.setMatrixAt(i, dummy.matrix);
+          const e = Math.max(0.001, env(lt, 11, 1.0, 1.0)), gather = easeIO(smooth(0, 2.5, lt)), burst = Math.max(0, lt - 6.8);
+          at(P, 0.6 * Math.sin(lt * 0.4), 0.3 * Math.sin(lt * 0.5), 0, c);
+          F.forEach((f, i) => {
+            f.a += raw * f.sp * (1 + 1.5 * Math.min(1, burst));
+            const ca = Math.cos(f.a), sa = Math.sin(f.a), r = f.r * lerp(3.5, 1, gather);
+            p.copy(c).addScaledVector(f.u, ca * r).addScaledVector(f.v, sa * r);
+            tg.copy(f.u).multiplyScalar(-sa * f.sp).addScaledVector(f.v, ca * f.sp);   // swimming direction along the orbit
+            if (burst > 0){ const k = burst * burst * 7; p.addScaledVector(f.out, k); tg.multiplyScalar(0.3).addScaledVector(f.out, 1); }   // startled: every fish shoots away
+            dummy.position.copy(p); dummy.lookAt(_mp.copy(p).add(tg));
+            dummy.rotateY(Math.sin(t * 14 + f.ph) * 0.25);   // tail beat
+            dummy.scale.setScalar(f.s * e * 2.6); dummy.updateMatrix(); fish.setMatrixAt(i, dummy.matrix);
           });
           fish.instanceMatrix.needsUpdate = true;
+          mat.emissiveIntensity = 0.25 + 0.25 * Math.max(0, Math.sin(t * 2.3));   // the light ripples across the school
+          const fk = smooth(6.8, 7.8, lt); flash.position.copy(c); flash.scale.setScalar(1 + 9 * fk); flash.material.opacity = smooth(6.7, 6.9, lt) * (1 - fk);
+          momentFx.ca += 0.03 * smooth(6.7, 6.9, lt) * (1 - smooth(6.9, 7.6, lt));
         },
-        end(){ fish.visible = false; }
+        end(){ fish.visible = flash.visible = false; }
       };
     } },
     { name: 'Mariposa cuántica', line: 'Cada aleteo cambia el color del universo.', dur: 9, make(P){
@@ -2672,27 +2745,59 @@ function init(){
         end(){ segs.l.visible = heads.p.visible = false; }
       };
     } },
-    { name: 'Lluvia hacia arriba', line: 'Gotas de luz que caen… hacia arriba.', dur: 8, make(P){
-      const N = 140, segs = segsOf(N, HC(0.7, 1.4, 2.6)); segs.l.visible = false; scene.add(segs.l);
-      const splash = []; for (let i = 0; i < 10; i++){ const s = sprite(novaRingTex, HC(0.6, 1.4, 2.4)); s.visible = false; scene.add(s); splash.push({ s, t0: -9, x: 0, d: 0 }); }
-      const drops = []; for (let i = 0; i < N; i++) drops.push({ x: (Math.random() - 0.5) * 7, d: (Math.random() - 0.5) * 3, ph: Math.random() * 6, v: 2.2 + Math.random() * 1.2, prev: 0 });
-      let si = 0;
+    { name: 'Lluvia hacia arriba', line: 'De un charco de luz brotan gotas que caen hacia arriba y forman una nube.', dur: 11, make(P){
+      const G = newGroup();   // local +Y follows the screen's up
+      // the pool of light below, rippling where each drop lifts off
+      const SLOTS = 10, rip = []; for (let i = 0; i < SLOTS; i++) rip.push(new THREE.Vector4(0, 0, -9, 0));
+      const poolMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uFade: { value: 0 }, uR: { value: rip } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `varying vec2 vP; void main(){ vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uTime, uFade; uniform vec4 uR[${SLOTS}]; varying vec2 vP;
+          void main(){
+            float d0 = length(vP), base = exp(-d0 * d0 * 0.18) * 0.35, ring = 0.0;
+            for (int i = 0; i < ${SLOTS}; i++){ float age = uTime - uR[i].z; if (age > 0.0 && age < 1.4){ float d = length(vP - uR[i].xy); ring += exp(-pow((d - age * 1.3) / 0.05, 2.0)) * (1.0 - age / 1.4); } }
+            float caustic = 0.5 + 0.5 * sin(vP.x * 5.0 + uTime * 1.3) * sin(vP.y * 4.0 - uTime * 1.1);
+            vec3 c = vec3(0.25, 0.75, 1.4) * (base * (0.6 + 0.4 * caustic) + ring * 1.4);
+            gl_FragColor = vec4(c * uFade * (1.0 - smoothstep(2.6, 3.2, d0)), 1.0);
+          }` });
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(3.2, 96).rotateX(-Math.PI / 2), poolMat); pool.position.y = -3; G.add(pool);
+      // the drops: clear, glinting, stretched by their speed
+      const N = 240, dropMat = new THREE.MeshPhysicalMaterial({ color: C('#d8f3ff'), metalness: 0, roughness: 0, clearcoat: 1, emissive: C('#3aa0ff'), emissiveIntensity: 0.7, envMapIntensity: 2.4, transparent: true, opacity: 0.9 });
+      const drops = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 14, 10), dropMat, N); drops.frustumCulled = false; G.add(drops);
+      const D = []; for (let i = 0; i < N; i++){ const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * 2.6; D.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, t0: 0.6 + Math.random() * 7.2, launched: false, size: 0.09 + Math.random() * 0.07 }); }
+      // the cloud gathering above, lit from inside
+      const cloud = []; for (let i = 0; i < 6; i++){ const s = sprite(nebulaTex, new THREE.Color().setHSL(0.56 + i * 0.015, 0.6, 0.6)); s.position.set((i - 2.5) * 0.8, 3.3 + (i % 2) * 0.3, (i % 3 - 1) * 0.4); s.material.rotation = Math.random() * 6; G.add(s); cloud.push(s); }
+      const glowC = sprite(dotTex, HC(0.8, 1.6, 2.6)); glowC.position.y = 3.3; G.add(glowC);
+      const dummy = new THREE.Object3D();
+      let slot = 0, caught = 0;
       return {
-        start(){ segs.l.visible = true; splash.forEach((p) => { p.s.visible = true; p.t0 = -9; }); },
+        start(){ G.position.copy(P.anchor); G.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(P.right, P.up, _mv.copy(P.out).negate())); G.rotateX(-0.45); G.visible = true; D.forEach((d) => { d.launched = false; }); caught = 0; rip.forEach((r) => { r.z = -9; }); },
         update(lt, raw, t){
-          const e = env(lt, 8, 0.8, 1.0);
-          drops.forEach((q, i) => {
-            const y = -3 + ((lt * q.v + q.ph) % 6);
-            if (y < q.prev){ const p = splash[si++ % splash.length]; if (lt - p.t0 > 0.6){ p.t0 = lt; p.x = q.x; p.d = q.d; } }   // it reached the top: a ripple
-            q.prev = y;
-            at(P, q.x, y, q.d, _mp); at(P, q.x, y - 0.3, q.d, _ms); segs.pos.set([_ms.x, _ms.y, _ms.z, _mp.x, _mp.y, _mp.z], i * 6);
+          const e = env(lt, 11, 0.8, 1.2);
+          poolMat.uniforms.uTime.value = lt; poolMat.uniforms.uFade.value = e;
+          caught = 0;
+          D.forEach((d, i) => {
+            const tau = lt - d.t0;
+            let y = -3, vs = 0, show = tau > -0.3 && lt < 10.4;
+            if (tau > 0){
+              if (!d.launched){ d.launched = true; const r = rip[slot++ % SLOTS]; r.x = d.x; r.y = d.z; r.z = lt; }   // the pool ripples as the drop lifts off
+              y = -3 + 1.9 * tau * tau; vs = 3.8 * tau;
+              if (y > 3.2){ show = false; caught++; }
+            } else { y = -3 + 0.08 * Math.max(0, 1 + tau / 0.3); }   // a bead swelling on the surface before it leaves
+            dummy.position.set(d.x + 0.05 * Math.sin(t * 3 + i), y, d.z);
+            const stretch = 1 + Math.min(4, vs * 0.45);
+            dummy.scale.set(d.size, show ? d.size * stretch : 0.0001, d.size); dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix(); drops.setMatrixAt(i, dummy.matrix);
           });
-          segs.flush(); segs.mat.opacity = 0.8 * e;
-          splash.forEach((p) => { const k = (lt - p.t0) / 0.6; if (k < 0 || k > 1){ p.s.material.opacity = 0; return; } at(P, p.x, 3, p.d, p.s.position); p.s.scale.setScalar(0.2 + 0.8 * k); p.s.material.opacity = (1 - k) * e; });
+          drops.instanceMatrix.needsUpdate = true; dropMat.opacity = 0.9 * e;
+          const fill = Math.min(1, caught / (N * 0.7));   // the cloud thickens as the rain reaches it
+          cloud.forEach((s, i) => { s.scale.setScalar(2 + 3.5 * fill + 0.2 * Math.sin(t + i)); s.material.opacity = (0.15 + 0.6 * fill) * e; s.material.rotation += raw * 0.05; });
+          glowC.scale.setScalar(3 + 4 * fill); glowC.material.opacity = (0.2 + 0.5 * fill * (0.7 + 0.3 * Math.sin(t * 7))) * e;
         },
-        end(){ segs.l.visible = false; splash.forEach((p) => { p.s.visible = false; }); }
+        end(){ G.visible = false; }
       };
     } }
+
   ];
 
   /* ===== group 5 · signals ===== */
@@ -3291,7 +3396,7 @@ function init(){
     'Ventana al pasado': [AWE, [[0.9, 'reachBoth']]],
     'Bucle de luz': [FEAR, [[0.3, 'trace'], [4.4, 'recoil']]],
     'Gato de Schrödinger': [AWE, [[0.5, 'beckon'], [3.2, 'clap']]],
-    'Clon del casco': [AWE, [[0.8, 'tap']]],
+    'Premonición': [AWE, [[0.8, 'tap'], [3.2, 'float'], [6, 'wave', { speed: 3 }]]],
     'El ojo del abismo': [FEAR, [[0.6, 'shield', { tremble: 0.4 }], [4.7, 'cover', { tremble: 0.6 }]]],
     'Ballena de plasma': [AWE, [[0.8, 'star']]],
     'Medusas estelares': [AWE, [[0.8, 'float']]],
@@ -3517,6 +3622,14 @@ function init(){
   let noteTimer = 0;
   function note(msg){ gyroNote.textContent = msg; gyroNote.hidden = false; clearTimeout(noteTimer); noteTimer = setTimeout(() => { gyroNote.hidden = true; }, 9000); }
   const BLOCKED = 'El visor donde se abre esta página bloquea los sensores de movimiento. Ábrela en tu propia web (con https) y el giroscopio funcionará.';
+  let stab = null; const _stP = new THREE.Vector3(), _stH = new THREE.Vector3();
+  function stabilize(){
+    setCine(false);
+    if (gyro.on){ goHome(); gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); return; }   // with the gyroscope, the current pose becomes the new centre
+    stab = { t: 0, from: camera.position.clone() };
+  }
+  const btnStab = document.getElementById('btn-estabilizar');
+  if (btnStab) btnStab.addEventListener('click', stabilize);
   function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'gira tu celular' : 'arrastra para buscarlos'; btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
   async function askGyro(fromTap){
     if (needsAsk){
@@ -3613,6 +3726,11 @@ function init(){
       sph.theta += (0.19 + 0.65 * Math.sin(t * 0.05) - sph.theta) * k;
       sph.phi += (1.24 + 0.07 * Math.sin(t * 0.083 + 1.3) - sph.phi) * k;
       off.setFromSpherical(sph); camera.position.copy(controls.target).add(off);
+    }
+    if (stab){   // gliding back to the home view
+      stab.t += raw; const k = easeIO(Math.min(1, stab.t / 0.9));
+      _stP.copy(controls.target).add(_stH.setFromSpherical(HOME)); camera.position.lerpVectors(stab.from, _stP, k);
+      if (stab.t >= 0.9) stab = null;
     }
     controls.update();
 
