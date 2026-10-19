@@ -3593,11 +3593,11 @@ function init(){
     toast(def);
     fireBurst(p); astroReact(def, p);
   }
-  const GAZE = Math.cos(D2R(5.5)), NEAR = Math.cos(D2R(10)), DWELL = 0.5;
+  const GAZE = Math.cos(D2R(6.5)), NEAR = Math.cos(D2R(8.5)), DWELL = 0.55;
   let found = 0;
   const cineOn = () => { try { return cine; } catch (err){ return false; } };   // declared further down, with the UI
   /* tap a light to play it: a short tap (not a drag) close to where the light is on screen */
-  const tapAt = { x: 0, y: 0, t: 0 }; let lightTapAt = -9;
+  const tapAt = { x: 0, y: 0, t: 0 };
   function lightAt(cx, cy){
     const r = renderer.domElement.getBoundingClientRect(); let best = null, bd = Math.max(34, r.width * 0.075);
     for (const p of points){
@@ -3609,30 +3609,31 @@ function init(){
     return best;
   }
   points.forEach((p) => {
-    p.orb.addEventListener('pointerdown', () => { lightTapAt = performance.now(); });
-    p.orb.addEventListener('click', (e) => { e.preventDefault(); lightTapAt = performance.now(); if (p.state === 'idle' && !points.some((q) => q.state === 'on')) playPoint(p); });
+    p.orb.addEventListener('click', (e) => { e.preventDefault(); if (p.state === 'idle' && !points.some((q) => q.state === 'on')) playPoint(p); });
   });
   renderer.domElement.addEventListener('pointerdown', (e) => { tapAt.x = e.clientX; tapAt.y = e.clientY; tapAt.t = performance.now(); });
   renderer.domElement.addEventListener('pointerup', (e) => {
     if (performance.now() - tapAt.t > 450 || Math.hypot(e.clientX - tapAt.x, e.clientY - tapAt.y) > 12) return;
     const p = lightAt(e.clientX, e.clientY); if (!p || points.some((q) => q.state === 'on')) return;
-    lightTapAt = performance.now(); playPoint(p);
+    playPoint(p);
   });
   /* the guide: a small label that points at a light until people have found a few */
   const hintEl = document.getElementById('light-hint'), quizEl = document.getElementById('quiz');
-  const hint = { t: -2.2, n: 0, p: null, on: false };
+  const hint = { t: -2.2, n: 0, p: null, on: false, tilt: false };
+  const AIM = document.getElementById('aim'), aim = { on: false, y: 0.29 };
   function showHint(v){ if (!hintEl || hint.on === v) return; hint.on = v; hintEl.classList.toggle('show', v); }
   function updateHint(raw){
     if (!hintEl) return;
     const busy = points.some((p) => p.state === 'on') || (quizEl && !quizEl.hidden) || document.body.classList.contains('is-clean');   // same rules as the orbs
-    if (busy || hint.n >= 4 || found >= 3){ showHint(false); if (busy) hint.t = Math.min(hint.t, -1.6); hint.p = null; return; }
+    if (gyro.on !== hint.tilt){ hint.tilt = gyro.on; hint.p = null; if (gyro.on){ hint.n = 0; hint.t = Math.max(hint.t, 0.4); } }   // the gyroscope just woke up: teach the tilt
+    if (busy || hint.n >= 4 || found >= 4){ showHint(false); if (busy) hint.t = Math.min(hint.t, -1.6); hint.p = null; return; }
     hint.t += raw;
     if (hint.t < 0){ showHint(false); return; }
     if (!hint.p || hint.p.state !== 'idle'){   // the idle light nearest the sweet spot of the screen
       hint.p = null; let bd = 9;
-      for (const p of points){ if (p.state !== 'idle') continue; _mndc.copy(p.anchor).project(camera); if (_mndc.z > 1 || Math.abs(_mndc.x) > 0.85 || Math.abs(_mndc.y) > 0.85) continue; const d = Math.hypot(_mndc.x, _mndc.y - 0.35); if (d < bd){ bd = d; hint.p = p; } }
+      for (const p of points){ if (p.state !== 'idle') continue; _mndc.copy(p.anchor).project(camera); if (_mndc.z > 1 || Math.abs(_mndc.x) > 0.85 || Math.abs(_mndc.y) > 0.85) continue; const d = Math.hypot(_mndc.x, _mndc.y - aim.y); if (d < bd){ bd = d; hint.p = p; } }
       if (!hint.p){ showHint(false); return; }
-      hintEl.firstChild.textContent = found ? (touchUI ? 'toca otra luz' : 'haz clic en otra luz') : (touchUI ? 'toca la luz' : 'haz clic en la luz');
+      hintEl.firstChild.textContent = gyro.on ? (found ? 'inclina tu celular hacia otra luz' : 'inclina tu celular hacia la luz') : found ? (touchUI ? 'toca otra luz' : 'haz clic en otra luz') : (touchUI ? 'toca la luz' : 'haz clic en la luz');
     }
     _mndc.copy(hint.p.anchor).project(camera);
     if (_mndc.z > 1 || Math.abs(_mndc.x) > 0.95 || Math.abs(_mndc.y) > 0.95){ hint.p = null; showHint(false); return; }
@@ -3679,6 +3680,25 @@ function init(){
       g.scale.setScalar(p.glint0 * (0.42 + 0.1 * pulse + 0.5 * near + 0.45 * wave + 0.2 * call + 1.0 * p.dwell / DWELL));
       p.ring.visible = true; p.ring.material.opacity = Math.min(1, 0.16 + 0.12 * pulse + 0.4 * near + 0.35 * wave + 0.3 * call); p.ring.material.rotation += raw * 0.6;
       p.ring.scale.setScalar(p.glint0 * (1.25 + 0.15 * Math.sin(t * 1.7 + p.ph) + 0.5 * wave + 0.6 * near - 0.8 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
+    }
+    _mndc.copy(camera.position).add(_mf).project(camera); aim.y = _mndc.y;
+    if (AIM){
+      const show = gyro.on && !quiet;
+      if (show !== aim.on){ aim.on = show; AIM.classList.toggle('on', show); }
+      if (show){
+        const ax = (_mndc.x * 0.5 + 0.5) * cr.width, ay = (0.5 - _mndc.y * 0.5) * cr.height;
+        AIM.style.transform = 'translate(' + ax.toFixed(1) + 'px,' + ay.toFixed(1) + 'px)';
+        let best = null, bs = -2, bk = 0;
+        for (const p of points){ if (p.state !== 'idle') continue; const sd = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf); if (sd > bs){ bs = sd; best = p; } bk = Math.max(bk, p.dwell / DWELL); }
+        AIM.style.setProperty('--k', Math.min(1, bk).toFixed(3));
+        if (best){
+          AIM.style.setProperty('--c', best.orb.style.getPropertyValue('--c'));
+          _mndc.copy(best.anchor).project(camera);
+          let dx = (_mndc.x * 0.5 + 0.5) * cr.width - ax, dy = (0.5 - _mndc.y * 0.5) * cr.height - ay; if (_mndc.z > 1){ dx = -dx; dy = -dy; }
+          AIM.style.setProperty('--a', Math.atan2(dy, dx).toFixed(3) + 'rad');
+          AIM.classList.toggle('near', bs > NEAR); AIM.classList.toggle('far', bs <= NEAR);
+        } else AIM.classList.remove('near', 'far');
+      }
     }
     updateHint(raw);
     stepFx(raw, t);
@@ -3900,7 +3920,7 @@ function init(){
   if (/debug/.test(location.hash)) window.__momentos = {
     play: (pi, si) => playPoint(points[pi], si),
     look(pi){ setCine(false); camera.position.copy(MT).addScaledVector(points[pi].out, -4.15); camera.lookAt(MT); },
-    points, momentFx, camera, astro, residents, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
+    points, momentFx, camera, astro, residents, step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
   };
 
   /* ---------- lights ---------- */
@@ -4051,7 +4071,7 @@ function init(){
   }
   const btnStab = document.getElementById('btn-estabilizar');
   if (btnStab) btnStab.addEventListener('click', stabilize);
-  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'toca o apunta a una luz' : (touchUI ? 'toca una luz para verlos' : 'haz clic en una luz'); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
+  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'mueve tu celular hacia una luz' : (touchUI ? 'toca una luz para verlos' : 'haz clic en una luz'); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
   async function askGyro(fromTap){
     if (needsAsk){
       try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted'){ if (fromTap) note('Permiso de movimiento denegado. Actívalo en Ajustes › Safari › Movimiento y orientación.'); return; } }
@@ -4067,9 +4087,8 @@ function init(){
     else {
       // the gyroscope starts with a tap anywhere (iOS requires it; every phone works the same way), and the view stays put until then
       controls.enableRotate = false;
-      if (MUI.hint) MUI.hint.textContent = 'toca una luz para verlos';
+      if (MUI.hint) MUI.hint.textContent = 'toca la pantalla y mueve tu celular';
       const once = () => {
-        if (performance.now() - lightTapAt < 700) return;   // that tap opened a light; the gyroscope waits for the next one
         removeEventListener('touchend', once); removeEventListener('click', once);
         if (!gyro.on) askGyro(true).then(() => { if (!gyro.on){ controls.enableRotate = true; if (MUI.hint) MUI.hint.textContent = (touchUI ? 'toca una luz para verlos' : 'haz clic en una luz'); } });
       };
@@ -4103,8 +4122,10 @@ function init(){
 
   function tick(){
     requestAnimationFrame(tick);
-
-    const real = clock.getDelta();
+    stepFrame();
+  }
+  function stepFrame(fixed){
+    const real = fixed || clock.getDelta();
     const raw = Math.min(real, 0.1);
     const dt = paused ? 0 : raw;
     speed += (speedTarget - speed) * Math.min(1, raw * 3);
