@@ -594,7 +594,7 @@ function init(){
   const MODE_Z = { swim: 0, dive: -1.4, brake: 0.3 };
   const MODE_LABEL = { swim: 'Nadando hacia la nave', reach: 'Estirándose hacia la nave', dive: 'Caída en picada', brake: 'Posición de frenado', brace: 'Se protege de un fragmento', grab: 'Intenta atrapar un fragmento' };
 
-  const anim = { mode: 'swim', modeT: reduceMotion ? 1e9 : 9, stroke: 0, kick: 0, reachT: 3, reachHold: 0, reach: 0, react: null, cool: 7,
+  const anim = { mode: 'swim', modeT: reduceMotion ? 1e9 : 9, stroke: 0, kick: 0, mt: 0, moment: null, reachT: 3, reachHold: 0, reach: 0, react: null, cool: 7,
     hr: 92, hrT: 92, breath: 0, spin: 0, roll: 0, fx: 1, approach: 0, label: MODE_LABEL.swim,
     q: ROOT.swim.clone(), waist: spring3(V(0, 0, 0)) };
   astro.quaternion.copy(ROOT.swim);
@@ -676,8 +676,10 @@ function init(){
     return best;
   }
 
+  let momentPose = () => null;   // set by the hidden moments: the astronaut's reaction to an event
   function animate(dt, t){
     if (dt <= 0) return;
+    anim.mt += dt;
     anim.cool -= dt; anim.modeT -= dt;
     if (anim.modeT <= 0 && !anim.react){
       anim.mode = MODE_NEXT[anim.mode]; anim.modeT = MODE_DUR[anim.mode]();
@@ -712,6 +714,7 @@ function init(){
       if (rel > 1.2 || R.time > 2.8 || mode !== 'swim'){ anim.react = null; anim.cool = 6 + rand() * 6; }
       else { pose = R.type === 'brace' ? POSES.brace : buildGrab(R, rel); label = MODE_LABEL[R.type]; }
     }
+    const mp = momentPose(); if (mp){ pose = mp; label = anim.moment.mood === 'fear' ? 'Asustado' : 'Maravillado'; }
     if (!pose) pose = mode === 'swim' ? buildSwim(t, anim.reach) : POSES[mode === 'dive' ? 'dive' : 'box'];
     anim.label = label;
     const k = pose.k * (reduceMotion ? 0.6 : 1);
@@ -1158,14 +1161,13 @@ function init(){
      The device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near upright.
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
-  const gyro = { on: false, seen: false, auto: true, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
+  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
   function onTilt(e){
     if (e.beta == null || e.gamma == null) return;
     gyro.seen = true;
-    // the sensor is already talking (Android, or iOS with access granted earlier): switch on with the page
-    if (!gyro.on){ if (!gyro.auto) return; gyro.auto = false; setGyro(true); }
+    if (!gyro.on) return;
     const D = Math.PI / 180;
     const ang = ((screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0)) * D;
     _de.set(e.beta * D, (e.alpha || 0) * D, -e.gamma * D, 'YXZ');
@@ -1227,7 +1229,7 @@ function init(){
   const env = (lt, dur, a, b) => smooth(0, a, lt) * (1 - smooth(dur - b, dur, lt));   // fade in over a, out over b
   const HC = (r, g, b) => new THREE.Color(r, g, b);   // linear colour; values above 1 bloom
   const _mf = new THREE.Vector3(), _mto = new THREE.Vector3(), _mp = new THREE.Vector3(), _mv = new THREE.Vector3(), _ms = new THREE.Vector3(), _mndc = new THREE.Vector3();
-  const momentFx = { ca: 0, lensK: 0, lensX: 0.5, lensY: 0.5, lensR: 0, freeze: 0, tintA: 0, tint: new THREE.Color(1, 1, 1), dim: 0 };
+  const momentFx = { ca: 0, lensK: 0, lensX: 0.5, lensY: 0.5, lensR: 0, ripX: 0.5, ripY: 0.5, ripR: 0, ripA: 0, freeze: 0, tintA: 0, tint: new THREE.Color(1, 1, 1), dim: 0 };
   const MUI = { hint: $('moments-hint'), toast: $('moment-toast') };
   const touchUI = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
   if (MUI.hint) MUI.hint.textContent = touchUI ? 'gira tu celular' : 'arrastra para buscarlos';
@@ -2228,17 +2230,74 @@ function init(){
         end(){ G.visible = false; }
       };
     } },
-    { name: 'Espejo del túnel', line: 'Un lago de mercurio refleja el agujero de gusano.', dur: 9, make(P){
-      const G = newGroup(), geo = new THREE.RingGeometry(0.001, 2.3, 96, 24), base = geo.attributes.position.array.slice();
-      G.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: C('#ffffff'), metalness: 1, roughness: 0.02, envMapIntensity: 1.8, side: THREE.DoubleSide })));
-      G.add(new THREE.Mesh(new THREE.TorusGeometry(2.32, 0.06, 12, 128), alu));
+    { name: 'Lago de mercurio', line: 'Gotas de mercurio se funden en un lago que te refleja… y vuelven a dispersarse.', dur: 11, make(P){
+      // a real mirror: a cube camera at the mercury renders the whole scene (astronaut included) a few times a second
+      const mirrorRT = new THREE.WebGLCubeRenderTarget(256, { type: HDR, generateMipmaps: false });
+      const mirrorCam = new THREE.CubeCamera(0.05, 600, mirrorRT); scene.add(mirrorCam);
+      const merc = new THREE.MeshStandardMaterial({ color: C('#e9eef5'), metalness: 1, roughness: 0.03, envMap: mirrorRT.texture, envMapIntensity: 1.4 });
+      const G = newGroup();
+      // the body: a dense sphere reshaped every frame (drop → wobbling blob → flat lake with ripples → blob → spray)
+      const geo = new THREE.SphereGeometry(1, 144, 96), pos = geo.attributes.position, nor = geo.attributes.normal, base = pos.array.slice(), NV = pos.count;
+      const seams = new Map();
+      for (let i = 0; i < NV; i++){ const k = base[i * 3].toFixed(4) + ',' + base[i * 3 + 1].toFixed(4) + ',' + base[i * 3 + 2].toFixed(4); const a = seams.get(k); if (a) a.push(i); else seams.set(k, [i]); }
+      const dupes = [...seams.values()].filter((a) => a.length > 1);
+      const body = new THREE.Mesh(geo, merc); body.frustumCulled = false; G.add(body);
+      // droplets that gather into the pool and are thrown out at the end
+      const dropGeo = new THREE.SphereGeometry(1, 32, 20), drops = [];
+      for (let i = 0; i < 18; i++){
+        const m = new THREE.Mesh(dropGeo, merc); m.visible = false; G.add(m);
+        const d = V(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+        drops.push({ m, d, r: 0.09 + Math.random() * 0.16, arrive: 0.3 + Math.random() * 1.7, dist: 4 + Math.random() * 3, spin: Math.random() * 6 });
+      }
+      const sheen = sprite(dotTex, HC(0.9, 1.0, 1.15)); sheen.scale.setScalar(6); G.add(sheen);   // soft light spilling off the metal
+      const nrm = new THREE.Vector3(), Yup = V(0, 1, 0);
+      let frame2 = 0;
+      function shape(lt, t){
+        const blob = 0.25 + 0.75 * easeIO(smooth(0.4, 2.3, lt)) - 0.75 * easeIO(smooth(9.0, 10.4, lt));
+        const flat = easeIO(smooth(3.0, 4.4, lt)) * (1 - easeIO(smooth(7.6, 8.9, lt)));
+        const wob = 0.35 + 0.65 * (smooth(1.6, 2.6, lt) * (1 - smooth(3.0, 3.6, lt)) + smooth(8.4, 9.0, lt));
+        const R = 0.95 * Math.max(0.02, blob), spread = lerp(1, 2.7, flat), squash = lerp(1, 0.075, flat);
+        const c2x = 0.9 * Math.cos(lt * 0.7), c2z = 0.6 * Math.sin(lt * 0.9);   // a second, wandering ripple source
+        for (let i = 0; i < NV; i++){
+          const nx = base[i * 3], ny = base[i * 3 + 1], nz = base[i * 3 + 2];
+          const w = 1 + wob * 0.085 * Math.sin(nx * 3.1 + t * 3.1) * Math.sin(ny * 2.6 + t * 2.3) * Math.sin(nz * 3.7 + t * 2.7);
+          const x = nx * R * w * spread, z = nz * R * w * spread;
+          let y = ny * R * w * squash;
+          if (flat > 0.001){
+            const r1 = Math.hypot(x, z), r2 = Math.hypot(x - c2x, z - c2z);
+            const wave = Math.sin(r1 * 7.5 - t * 5.2) * Math.exp(-r1 * 0.45) * 0.065 + Math.sin(r2 * 10 - t * 7) * Math.exp(-r2 * 0.9) * 0.03;
+            y += flat * wave * (ny > 0 ? 1 : 0.25) * smooth(0, 0.25, 1 - r1 / (2.7 * R + 0.001));   // calm at the rim
+          }
+          pos.setXYZ(i, x, y, z);
+        }
+        pos.needsUpdate = true; geo.computeVertexNormals();
+        for (const a of dupes){ nrm.set(0, 0, 0); for (const i of a) nrm.x += nor.getX(i), nrm.y += nor.getY(i), nrm.z += nor.getZ(i); nrm.normalize(); for (const i of a) nor.setXYZ(i, nrm.x, nrm.y, nrm.z); }   // no seam
+        nor.needsUpdate = true;
+        return blob;
+      }
       return {
-        start(){ G.position.copy(P.anchor); faceCam(G); G.rotateX(-0.5); G.visible = true; },
+        start(){ G.position.copy(P.anchor); G.visible = true; frame2 = 0; drops.forEach((q) => { q.m.visible = true; }); },
         update(lt, raw, t){
-          const pos = geo.attributes.position, amp = 0.09 * (1 - smooth(1, 8, lt));
-          for (let i = 0; i < pos.count; i++){ const r = Math.hypot(base[i * 3], base[i * 3 + 1]); pos.setZ(i, Math.sin(r * 7 - lt * 5) * amp * Math.exp(-r * 0.35)); }
-          pos.needsUpdate = true; geo.computeVertexNormals();
-          G.scale.setScalar(Math.max(0.001, env(lt, 9, 0.8, 1.0)));
+          // tilt the pool so it reflects the astronaut toward you: its normal halves the angle between camera and astronaut
+          _mp.copy(camera.position).sub(G.position).normalize(); _ms.copy(astro.position).sub(G.position).normalize();
+          G.quaternion.setFromUnitVectors(Yup, _mp.add(_ms).normalize());
+          const blob = shape(lt, t);
+          drops.forEach((q) => {
+            const inK = smooth(q.arrive - 0.9, q.arrive, lt), outK = smooth(9.0, 10.8, lt);
+            const dist = inK < 1 ? q.dist * (1 - easeIO(inK)) : outK * q.dist * 1.1;
+            q.m.position.copy(q.d).multiplyScalar(dist + 0.0001);
+            const s = q.r * (1 - inK) + q.r * outK * (1 - smooth(10.2, 11, lt));   // it melts into the pool, and is thrown out again at the end
+            q.m.scale.setScalar(Math.max(0.001, s)); q.m.visible = s > 0.002;
+          });
+          sheen.material.opacity = 0.18 * blob;
+          // refresh the reflection every other frame, without the mercury itself in it
+          if ((frame2++ & 1) === 0){
+            G.visible = false; mirrorCam.position.copy(G.position); mirrorCam.updateMatrixWorld();
+            const sh = renderer.shadowMap.needsUpdate; renderer.shadowMap.needsUpdate = false;
+            mirrorCam.update(renderer, scene); mirrorRT.texture.needsPMREMUpdate = true;
+            renderer.shadowMap.needsUpdate = sh; G.visible = true;
+          }
+          momentFx.ca += 0.012 * smooth(2.0, 2.3, lt) * (1 - smooth(2.3, 3.0, lt));
         },
         end(){ G.visible = false; }
       };
@@ -2482,10 +2541,63 @@ function init(){
         end(){ G.visible = false; }
       };
     } },
-    { name: 'Laberinto de luz', line: 'Un laberinto se dibuja solo… y algo lo resuelve.', dur: 10, make(P){
-      const G = newGroup(), n = 9, size = 4.4, cell = size / n, MAXW = 2 * n * (n + 1), walls = segsOf(MAXW, HC(0.6, 1.6, 2.4)); G.add(walls.l);
-      const runner = sprite(novaCoreTex, HC(2.4, 1.6, 0.6)); runner.scale.setScalar(0.5); G.add(runner);
-      let wallList = [], route = [];
+    { name: 'Laberinto de luz', line: 'Un laberinto de cristal se alza… y una chispa encuentra la salida.', dur: 12.5, make(P){
+      const G = newGroup(), n = 11, cell = 0.42, size = n * cell, WALL_H = 0.42, THICK = 0.06, MAXW = 2 * n * (n + 1);
+      // neon glass walls: dark glassy body, bright edges, a light band sweeping upward
+      const wallGeo = new THREE.BoxGeometry(1, 1, 1);
+      const seeds = new Float32Array(MAXW); for (let i = 0; i < MAXW; i++) seeds[i] = Math.random();
+      wallGeo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+      const wallMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uFade: { value: 0 }, uFlash: { value: 0 } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `attribute float aSeed; varying vec3 vL; varying vec3 vN; varying vec3 vV; varying float vSeed;
+          void main(){
+            vSeed = aSeed; vL = position;
+            vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+            vV = -mv.xyz; vN = normalize(normalMatrix * mat3(instanceMatrix) * normal);
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `uniform float uTime, uFade, uFlash; varying vec3 vL; varying vec3 vN; varying vec3 vV; varying float vSeed;
+          void main(){
+            vec3 a = abs(vL) * 2.0;
+            float ex = smoothstep(0.86, 1.0, a.x), ey = smoothstep(0.86, 1.0, a.y), ez = smoothstep(0.7, 1.0, a.z);
+            float edge = max(max(ex * ey, ey * ez), ex * ez);
+            float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+            float h = vL.y + 0.5;
+            float band = exp(-pow(h - fract(uTime * 0.55 + vSeed), 2.0) * 120.0);
+            vec3 tint = mix(vec3(0.25, 0.9, 1.6), vec3(1.0, 0.45, 1.8), vSeed);
+            vec3 c = tint * (0.025 + 0.12 * f + 0.75 * edge + 0.35 * band + 0.2 * pow(h, 6.0)) + vec3(0.7, 0.75, 0.85) * uFlash;
+            gl_FragColor = vec4(c * uFade, 1.0);
+          }`
+      });
+      const walls = new THREE.InstancedMesh(wallGeo, wallMat, MAXW); walls.frustumCulled = false; G.add(walls);
+      // floor: a faint grid that lights up under the spark
+      const floorMat = new THREE.ShaderMaterial({
+        uniforms: { uFade: { value: 0 }, uOrb: { value: new THREE.Vector2(99, 99) }, uCell: { value: cell }, uHalf: { value: size / 2 } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `varying vec2 vP; void main(){ vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uFade, uCell, uHalf; uniform vec2 uOrb; varying vec2 vP;
+          void main(){
+            vec2 g = abs(fract((vP + uHalf) / uCell + 0.5) - 0.5);
+            float line = exp(-min(g.x, g.y) * 40.0);
+            float fade = 1.0 - smoothstep(uHalf * 0.75, uHalf * 1.25, max(abs(vP.x), abs(vP.y)));
+            float pool = exp(-dot(vP - uOrb, vP - uOrb) * 6.0);
+            vec3 c = vec3(0.2, 0.6, 1.2) * line * 0.35 * fade + vec3(2.2, 1.5, 0.6) * pool * 0.6;
+            gl_FragColor = vec4(c * uFade, 1.0);
+          }`
+      });
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.3, size * 1.3).rotateX(-Math.PI / 2), floorMat); floor.position.y = -0.002; G.add(floor);
+      // the spark that solves it, with a golden ribbon of light behind
+      const orb = sprite(novaCoreTex, HC(2.6, 1.9, 0.8)); orb.scale.setScalar(0.55); G.add(orb);
+      const orbHalo = sprite(dotTex, HC(2.0, 1.2, 0.4)); orbHalo.scale.setScalar(1.4); G.add(orbHalo);
+      const TRAIL = 260, trail = pointsOf(TRAIL, 0.09, HC(2.6, 1.7, 0.6)); G.add(trail.p);
+      const exitRing = sprite(novaRingTex, HC(0.8, 2.4, 1.6)); G.add(exitRing);
+      const startGlow = sprite(dotTex, HC(0.6, 1.8, 2.4)); G.add(startGlow);
+      // when it is solved the walls rise as sparks
+      const DUST = 360, dust = pointsOf(DUST, 0.07, HC(1.2, 1.8, 2.6)); G.add(dust.p);
+      const dustSeed = new Float32Array(DUST * 4);
+      const dummy = new THREE.Object3D();
+      let wallList = [], route = [], routeLen = [], total = 0;
       function build(){
         const seen = new Uint8Array(n * n), right = new Uint8Array(n * n).fill(1), down = new Uint8Array(n * n).fill(1), prev = new Int32Array(n * n).fill(-1), stack = [0];
         seen[0] = 1;
@@ -2498,20 +2610,61 @@ function init(){
           if (k === c + 1) right[c] = 0; else if (k === c - 1) right[k] = 0; else if (k === c + n) down[c] = 0; else down[k] = 0;
           seen[k] = 1; prev[k] = c; stack.push(k);
         }
-        const X = (i) => -size / 2 + i * cell, Y = (j) => size / 2 - j * cell;
-        wallList = [[X(0), Y(0), X(n), Y(0)], [X(0), Y(0), X(0), Y(n)]];
-        for (let c = 0; c < n * n; c++){ const x = c % n, y = (c / n) | 0; if (right[c] && c !== n * n - 1) wallList.push([X(x + 1), Y(y), X(x + 1), Y(y + 1)]); if (down[c]) wallList.push([X(x), Y(y + 1), X(x + 1), Y(y + 1)]); }
-        shuffle(wallList);   // the walls appear in random order
-        route = []; for (let c = n * n - 1; c !== -1; c = prev[c]) route.unshift([X(c % n) + cell / 2, Y((c / n) | 0) - cell / 2]);
+        const X = (i) => -size / 2 + i * cell, Z = (j) => -size / 2 + j * cell;
+        wallList = [];
+        const push = (x0, z0, x1, z1) => { const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2; wallList.push({ cx, cz, len: Math.hypot(x1 - x0, z1 - z0) + THICK, rot: x0 === x1 ? Math.PI / 2 : 0, t0: 0.4 + Math.hypot(cx, cz) * 0.45 + Math.random() * 0.25 }); };
+        for (let i = 0; i < n; i++){ if (i > 0) push(X(i), Z(0), X(i + 1), Z(0)); push(X(i), Z(n), X(i + 1), Z(n)); }   // top edge (open at the entrance) and bottom edge
+        for (let j = 0; j < n; j++){ push(X(0), Z(j), X(0), Z(j + 1)); }
+        for (let c = 0; c < n * n; c++){
+          const x = c % n, y = (c / n) | 0;
+          if (right[c] && x < n - 1) push(X(x + 1), Z(y), X(x + 1), Z(y + 1));
+          if (down[c] && y < n - 1) push(X(x), Z(y + 1), X(x + 1), Z(y + 1));
+        }
+        for (let j = 0; j < n - 1; j++) push(X(n), Z(j), X(n), Z(j + 1));   // right edge, open at the exit
+        route = [];
+        route.push([X(0) + cell / 2, Z(0) - cell * 0.8]);   // walk in from outside
+        const cells = []; for (let c = n * n - 1; c !== -1; c = prev[c]) cells.unshift(c);
+        cells.forEach((c) => route.push([X(c % n) + cell / 2, Z((c / n) | 0) + cell / 2]));
+        route.push([X(n) + cell * 0.8, Z(n - 1) + cell / 2]);   // and out through the exit
+        routeLen = [0]; total = 0;
+        for (let i = 1; i < route.length; i++){ total += Math.hypot(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]); routeLen.push(total); }
+        for (let i = 0; i < DUST; i++){ const w = wallList[(Math.random() * wallList.length) | 0]; dustSeed[i * 4] = w.cx + (Math.random() - 0.5) * w.len * (w.rot ? 0.1 : 1); dustSeed[i * 4 + 1] = w.cz + (Math.random() - 0.5) * w.len * (w.rot ? 1 : 0.1); dustSeed[i * 4 + 2] = Math.random() * WALL_H; dustSeed[i * 4 + 3] = 0.6 + Math.random() * 1.4; }
+        exitRing.position.set(route[route.length - 1][0], 0.2, route[route.length - 1][1]);
+        startGlow.position.set(route[0][0], 0.15, route[0][1]);
       }
+      const along = (d, out) => {   // a point at distance d along the solved route
+        let i = 1; while (i < routeLen.length - 1 && routeLen[i] < d) i++;
+        const k = THREE.MathUtils.clamp((d - routeLen[i - 1]) / Math.max(1e-6, routeLen[i] - routeLen[i - 1]), 0, 1);
+        return out.set(lerp(route[i - 1][0], route[i][0], k), 0.17, lerp(route[i - 1][1], route[i][1], k));
+      };
       return {
-        start(){ build(); G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        start(){ build(); G.position.copy(P.anchor); faceCam(G); G.rotateX(1.0); G.visible = true; },
         update(lt, raw, t){
-          const e = env(lt, 10, 0.4, 1.0), show = Math.floor(smooth(0.3, 3.5, lt) * wallList.length);
-          for (let i = 0; i < MAXW; i++){ const w = i < show ? wallList[i] : null; walls.pos.set(w ? [w[0], w[1], 0, w[2], w[3], 0] : [0, 0, 1e4, 0, 0, 1e4], i * 6); }
-          walls.flush(); walls.mat.opacity = e;
-          const rk = smooth(3.8, 8.5, lt) * (route.length - 1), i0 = Math.floor(rk), f = rk - i0, p0 = route[Math.min(i0, route.length - 1)], p1 = route[Math.min(i0 + 1, route.length - 1)];
-          runner.position.set(lerp(p0[0], p1[0], f), lerp(p0[1], p1[1], f), 0.05); runner.material.opacity = e * smooth(3.5, 3.9, lt);
+          const e = env(lt, 12.5, 0.4, 1.2), solved = smooth(9.6, 9.9, lt), melt = smooth(9.8, 12.0, lt);
+          wallMat.uniforms.uTime.value = t; wallMat.uniforms.uFade.value = e * (1 - melt); wallMat.uniforms.uFlash.value = solved * (1 - smooth(9.9, 10.8, lt));
+          floorMat.uniforms.uFade.value = e;
+          // the walls rise in a wave from the centre outward
+          wallList.forEach((w, i) => {
+            const h = WALL_H * easeIO(smooth(w.t0, w.t0 + 0.6, lt)) * (1 + 0.6 * melt);
+            dummy.position.set(w.cx, h / 2 + melt * w.t0 * 0.6, w.cz); dummy.rotation.set(0, w.rot, 0); dummy.scale.set(w.len, Math.max(0.0001, h), THICK);
+            dummy.updateMatrix(); walls.setMatrixAt(i, dummy.matrix);
+          });
+          for (let i = wallList.length; i < MAXW; i++){ dummy.scale.set(0, 0, 0); dummy.updateMatrix(); walls.setMatrixAt(i, dummy.matrix); }
+          walls.instanceMatrix.needsUpdate = true;
+          // the spark: it hesitates at the start, then runs the corridors and leaves through the exit
+          const run = easeIO(smooth(3.6, 9.6, lt)) * total;
+          along(run, orb.position); orbHalo.position.copy(orb.position);
+          const on = smooth(3.2, 3.6, lt) * (1 - smooth(10.4, 11.2, lt));
+          orb.material.opacity = on; orbHalo.material.opacity = 0.6 * on; orb.scale.setScalar(0.45 + 0.1 * Math.sin(t * 20));
+          floorMat.uniforms.uOrb.value.set(orb.position.x, orb.position.z);
+          for (let i = 0; i < TRAIL; i++){ along(Math.max(0, run - i * 0.03), _mp); trail.pos.set([_mp.x, _mp.y - 0.04 * (i / TRAIL), _mp.z], i * 3); }
+          trail.flush(); trail.mat.opacity = on * 0.9;
+          exitRing.scale.setScalar(0.6 + 0.3 * Math.sin(t * 4) + 2.5 * solved); exitRing.material.opacity = e * (0.5 + 0.5 * solved) * (1 - melt);
+          startGlow.scale.setScalar(0.7 + 0.2 * Math.sin(t * 3)); startGlow.material.opacity = e * (1 - smooth(3.6, 5.0, lt)) * 0.8;
+          // the solved maze dissolves into rising sparks
+          for (let i = 0; i < DUST; i++){ const k = melt * dustSeed[i * 4 + 3]; dust.pos.set([dustSeed[i * 4], melt > 0 ? dustSeed[i * 4 + 2] + k * 2.2 : 1e4, dustSeed[i * 4 + 1]], i * 3); }
+          dust.flush(); dust.mat.opacity = Math.min(1, melt * 3) * (1 - smooth(11.4, 12.4, lt));
+          momentFx.ca += 0.03 * solved * (1 - smooth(9.9, 10.6, lt));
         },
         end(){ G.visible = false; }
       };
@@ -2593,7 +2746,9 @@ function init(){
     // the events sit a little above the astronaut, so the astronaut never hides them
     const anchor = MT.clone().addScaledVector(out, d.dist).addScaledVector(up, (d.dist + 4.15) * Math.tan(LIFT)), glint = sprite(novaCoreTex, d.color);
     glint.position.copy(anchor); scene.add(glint);
-    return { anchor, out, right, up, defs: d.defs, bag: [], last: -1, glint, glint0: 0.11 * (d.dist + 4), state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
+    const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); scene.add(ring);
+    const aura = sprite(nebulaTex, d.color.clone().multiplyScalar(0.45)); aura.position.copy(anchor).addScaledVector(out, 2); aura.visible = false; scene.add(aura);
+    return { anchor, out, right, up, color: d.color, ring, aura, defs: d.defs, bag: [], last: -1, glint, glint0: 0.11 * (d.dist + 4), state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });
   function nextIndex(p){
     if (!p.bag.length){
@@ -2618,6 +2773,7 @@ function init(){
     p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false;
     points.forEach((q) => { if (q !== p && q.state === 'spent') q.state = 'idle'; });   // activating a point brings the spent ones back
     toast(def);
+    fireBurst(p); astroReact(def, p);
   }
   const GAZE = Math.cos(THREE.MathUtils.degToRad(12)), DWELL = 0.5;
   function updateMoments(raw, t){
@@ -2627,12 +2783,13 @@ function init(){
     _mv.set(0, 1, 0).applyQuaternion(camera.quaternion); _mf.multiplyScalar(Math.cos(LIFT)).addScaledVector(_mv, Math.sin(LIFT)).normalize();   // the sweet spot, just above the astronaut
     for (const p of points){
       if (p.state === 'on'){
+        p.ring.visible = false;
         p.time += raw;
         try { p.cur.inst.update(p.time, raw, t); } catch (err){ console.error(err); p.time = p.cur.dur; }
         if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; }
         continue;
       }
-      if (p.state === 'spent'){ p.glint.visible = false; continue; }
+      if (p.state === 'spent'){ p.glint.visible = p.ring.visible = false; continue; }
       const s = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf), near = smooth(GAZE - 0.08, GAZE, s);
       p.dwell = s > GAZE ? p.dwell + raw : Math.max(0, p.dwell - raw * 2);
       if (p.dwell >= DWELL){ playPoint(p); continue; }
@@ -2640,6 +2797,169 @@ function init(){
       g.visible = true;
       g.material.opacity = Math.min(1, 0.4 + 0.3 * pulse + 0.5 * near);
       g.scale.setScalar(p.glint0 * (0.7 + 0.3 * pulse + 0.8 * near + 1.4 * p.dwell / DWELL));
+      p.ring.visible = true; p.ring.material.opacity = 0.25 + 0.45 * near; p.ring.material.rotation += raw * 0.6;
+      p.ring.scale.setScalar(p.glint0 * (1.6 + 0.2 * Math.sin(t * 1.7 + p.ph) + 1.2 * near - 0.8 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
+    }
+    stepFx(raw, t);
+  }
+  /* ===== the astronaut reacts to every event ===== */
+  // gestures in body space (+Y head, +Z belly, +X the astronaut's left); s is the side the event is on, d points at it
+  const _rv = new THREE.Vector3(), _rw = new THREE.Vector3();
+  const N3 = (x, y, z) => V(x, y, z).normalize();
+  const ARM = (s, u, f, c, w) => ({ u: N3(s * u[0], u[1], u[2]), f: N3(s * f[0], f[1], f[2]), c, w });
+  const LEG = (s, u, f, w) => ({ u: N3(s * u[0], u[1], u[2]), f: N3(s * f[0], f[1], f[2]), w });
+  const relaxedArm = (s) => ARM(s, [0.45, -0.75, -0.25], [0.35, -0.8, 0.1], 0.4, 0.1);
+  const legsRelaxed = (t) => ({ 1: LEG(1, [0.1, -1, 0.12 + 0.08 * Math.sin(t * 3)], [0.08, -1, -0.1 + 0.1 * Math.sin(t * 3 - 0.8)], 0.5), '-1': LEG(-1, [0.1, -1, 0.12 + 0.08 * Math.sin(t * 3 + Math.PI)], [0.08, -1, -0.1 + 0.1 * Math.sin(t * 3 - 0.8 + Math.PI)], 0.5) });
+  const legsSym = (u, f, w) => ({ 1: LEG(1, u, f, w), '-1': LEG(-1, u, f, w) });
+  const armsSym = (u, f, c, w) => ({ 1: ARM(1, u, f, c, w), '-1': ARM(-1, u, f, c, w) });
+  const pair = (s, near, far) => (s > 0 ? { 1: near, '-1': far } : { 1: far, '-1': near });
+  const reachArm = (s, d, c, w, spread) => ({ u: N3(d.x + s * (spread || 0), d.y, d.z), f: N3(d.x + s * (spread || 0) * 0.6, d.y + 0.05, d.z), c, w });
+  const twistTo = (d, amt) => THREE.MathUtils.clamp(Math.atan2(d.x, d.z) * amt, -0.55, 0.55);
+  const pose = (k, waist, arm, leg) => ({ k, waist, arm, leg });
+  const GEST = {
+    reach: ({ s, d, t }) => pose(12, [-0.05, twistTo(d, 0.4), 0], pair(s, reachArm(s, d, 0.1 + 0.15 * Math.sin(t * 5), -0.3), relaxedArm(-s)), legsRelaxed(t)),
+    reachBoth: ({ d, t }) => pose(10, [-0.15, twistTo(d, 0.3), 0], { 1: reachArm(1, d, 0.05, -0.35, 0.18), '-1': reachArm(-1, d, 0.05, -0.35, 0.18) }, legsRelaxed(t)),
+    point: ({ s, d, t }) => pose(16, [0, twistTo(d, 0.45), 0], pair(s, reachArm(s, d, 1, 0), ARM(-s, [0.2, -0.3, 0.9], [-0.6, 0.5, 0.5], 0.6, 0.2)), legsRelaxed(t)),
+    helmet: () => pose(18, [0.12, 0, 0], armsSym([0.8, 0.45, 0.35], [-0.55, 0.75, 0.35], 0.25, 0.2), legsSym([0.12, -0.9, 0.3], [0.08, -0.9, -0.35], 0.4)),   // hands on the helmet
+    cover: () => POSES.brace,
+    shield: ({ s, d }) => pose(22, [0.2, twistTo(d, -0.3), 0], pair(s, ARM(s, [0.3, 0.1, 0.95], [-0.45, 0.8, 0.35], 0.85, 0.4), ARM(-s, [0.7, -0.4, -0.55], [0.5, -0.5, -0.7], 0.3, -0.2)), legsSym([0.15, -0.6, 0.75], [0.1, -0.95, -0.25], 0.2)),
+    recoil: () => pose(26, [-0.32, 0, 0], armsSym([0.8, 0.2, -0.55], [0.4, 0.6, -0.7], 0.05, -0.45), legsSym([0.15, -0.5, 0.85], [0.1, -0.95, -0.3], 0.2)),
+    fetal: () => pose(18, [0.55, 0, 0], armsSym([0.3, -0.3, 0.9], [-0.6, -0.4, 0.7], 0.95, 0.4), legsSym([0.12, -0.15, 1], [0.05, -1, 0.05], 0.1)),
+    star: () => pose(8, [-0.22, 0, 0], armsSym([0.95, 0.3, 0.05], [0.7, 0.7, 0.1], 0.05, -0.25), legsSym([0.5, -0.85, 0], [0.45, -0.9, 0], 0.65)),
+    wave: ({ s, d, t, o }) => pose(14, [0, twistTo(d, 0.4), 0], pair(s, ARM(s, [0.7, 0.7, 0.15], [0.3 + 0.45 * Math.sin(t * (o.speed || 8)), 1, 0.15], 0.05, 0), relaxedArm(-s)), legsRelaxed(t)),
+    salute: ({ s, d }) => pose(20, [0, twistTo(d, 0.5), 0], pair(s, ARM(s, [0.75, 0.35, 0.55], [-0.6, 0.65, 0.45], 0, -0.2), ARM(-s, [0.15, -1, 0], [0.12, -1, 0.05], 0.5, 0)), legsSym([0.04, -1, 0], [0.03, -1, 0], 0.85)),
+    tap: ({ s, t }) => pose(24, [0.08, 0, 0], pair(s, ARM(s, [0.4, 0.2, 0.9], [-0.3, 0.8 + 0.25 * Math.sin(t * 11), 0.5], 0.6, 0.1), ARM(-s, [0.5, -0.3, 0.5], [-0.2, 0.3, 0.9], 0.5, 0.2)), legsRelaxed(t)),   // knocks on the visor
+    hug: () => pose(16, [0.3, 0, 0], armsSym([0.35, -0.35, 0.85], [-0.95, 0.15, 0.25], 0.7, 0.3), legsSym([0.06, -0.8, 0.45], [0.04, -0.9, -0.4], 0.3)),
+    duck: () => pose(22, [0.38, 0, 0], armsSym([0.55, 0.75, 0.35], [-0.75, 0.45, 0.45], 0.8, 0.3), legsSym([0.15, -0.35, 0.9], [0.1, -1, -0.1], 0.2)),
+    clap: ({ t }) => pose(26, [0.05, 0, 0], armsSym([0.25, 0.15, 0.95], [-(0.35 + 0.3 * Math.sin(t * 9)), 0.2, 0.9], 0.1, -0.1), legsRelaxed(t)),
+    flee: ({ t }) => {   // frantic crawl, much faster than the normal stroke
+      const A = {}, L = {};
+      for (const s of [1, -1]){
+        A[s] = { u: new THREE.Vector3(), f: new THREE.Vector3(), c: 0, w: 0 }; crawlKey((t * 7 + (s > 0 ? 0 : Math.PI)) % (Math.PI * 2), s, A[s]);
+        const ph = s > 0 ? 0 : Math.PI; L[s] = LEG(s, [0.07, -1, 0.04 + 0.2 * Math.sin(t * 16 + ph)], [0.05, -1, -0.03 + 0.3 * Math.sin(t * 16 - 0.9 + ph)], 0.9);
+      }
+      return pose(28, [0, 0.15 * Math.sin(t * 7), 0], A, L);
+    },
+    look: ({ t }) => pose(10, [-0.05, 0.6 * Math.sin(t * 1.3), 0.1 * Math.sin(t * 0.9)], armsSym([0.85, -0.2, 0.2], [0.75, 0.1, 0.4], 0.3, 0), legsSym([0.25, -0.95, 0.05], [0.2, -0.95, -0.1], 0.5)),   // turns to look around
+    catch: ({ d, t }) => pose(14, [0.1, twistTo(d, 0.35), 0], { 1: reachArm(1, d, 0.55, 0.5, 0.1), '-1': reachArm(-1, d, 0.55, 0.5, 0.1) }, legsRelaxed(t)),   // cupped hands
+    beckon: ({ s, d, t }) => pose(12, [-0.05, twistTo(d, 0.35), 0], pair(s, reachArm(s, d, 0.35 + 0.35 * Math.sin(t * 4), 0.2), relaxedArm(-s)), legsRelaxed(t)),
+    stretchUp: ({ t }) => pose(9, [-0.3, 0, 0], armsSym([0.3, 0.95, -0.05], [0.25, 1, -0.05], 0.05 + 0.1 * Math.sin(t * 3), -0.3), legsSym([0.15, -0.95, -0.1], [0.1, -0.95, -0.2], 0.7)),
+    trace: ({ s, d, t }) => pose(14, [0, twistTo(d, 0.4), 0], pair(s, reachArm(s, _rv.copy(d).add(_rw.set(0.35 * Math.sin(t * 2.2), 0.25 * Math.sin(t * 3.1), 0)), 1, 0), relaxedArm(-s)), legsRelaxed(t)),   // follows the shape with a finger
+    float: ({ t }) => pose(6, [-0.1 + 0.08 * Math.sin(t), 0.15 * Math.sin(t * 0.6), 0], armsSym([0.7, -0.1 + 0.15 * Math.sin(t * 0.8), 0.2], [0.6, 0.3, 0.3], 0.15, 0), legsSym([0.2, -0.95, 0.1], [0.15, -0.9, -0.2], 0.5)),   // limp, dreamy
+    shake: ({ t }) => pose(30, [0.1, 0.5 * Math.sin(t * 9), 0], armsSym([0.6, -0.4, 0.6], [0.4, 0.2, 0.9], 0.8, 0.2), legsRelaxed(t * 3))   // shakes it off
+  };
+  function shakePose(p, t, a){   // a copy of the pose with a nervous tremor on every limb
+    const q = { k: p.k, waist: p.waist.slice(), arm: {}, leg: {} }, j = (x, y, z) => _rw.set(Math.sin(t * 31 + x), Math.sin(t * 27 + y), Math.sin(t * 35 + z)).multiplyScalar(0.07 * a);
+    for (const s of [1, -1]){
+      const A = p.arm[s], L = p.leg[s];
+      q.arm[s] = { u: A.u.clone().add(j(s, 2 * s, 3 * s)).normalize(), f: A.f.clone().add(j(4 * s, s, 2)).normalize(), c: A.c, w: A.w };
+      q.leg[s] = { u: L.u.clone().add(j(5, 3 * s, s)).normalize(), f: L.f.clone().add(j(s, 6, 2 * s)).normalize(), w: L.w };
+    }
+    q.waist[1] += 0.03 * a * Math.sin(t * 29);
+    return q;
+  }
+  // a different sequence for each of the 50 events: [seconds into the event, gesture, options]
+  const AWE = 'awe', FEAR = 'fear';
+  const REACT = {
+    'Eco temporal': [AWE, [[0.6, 'wave', { speed: 3 }], [6.5, 'recoil']]],
+    'Reloj derretido': [AWE, [[0.8, 'point'], [3, 'helmet']]],
+    'Déjà vu': [FEAR, [[0.3, 'look'], [2.4, 'point'], [4.8, 'helmet', { tremble: 0.3 }]]],
+    'Tiempo congelado': [AWE, [[0.2, 'look']]],
+    'Reloj de arena': [AWE, [[0.8, 'catch']]],
+    'Nave del futuro': [AWE, [[1, 'salute']]],
+    'Ventana al pasado': [AWE, [[0.9, 'reachBoth']]],
+    'Bucle de luz': [FEAR, [[0.3, 'trace'], [4.4, 'recoil']]],
+    'Gato de Schrödinger': [AWE, [[0.5, 'beckon'], [3.2, 'clap']]],
+    'Clon del casco': [AWE, [[0.8, 'tap']]],
+    'El ojo del abismo': [FEAR, [[0.6, 'shield', { tremble: 0.4 }], [4.7, 'cover', { tremble: 0.6 }]]],
+    'Ballena de plasma': [AWE, [[0.8, 'star']]],
+    'Medusas estelares': [AWE, [[0.8, 'float']]],
+    'Cardumen de cristal': [AWE, [[0.6, 'reach']]],
+    'Mariposa cuántica': [AWE, [[0.6, 'beckon'], [3, 'catch'], [6, 'clap']]],
+    'Gusano cósmico': [FEAR, [[0.5, 'recoil'], [1.5, 'fetal', { tremble: 0.7 }]]],
+    'Dragón de nebulosa': [FEAR, [[0.6, 'point'], [4.4, 'cover', { tremble: 0.8 }]]],
+    'Mano gigante': [FEAR, [[0.5, 'hug', { tremble: 0.6 }]]],
+    'Flor estelar': [AWE, [[0.8, 'reachBoth'], [4, 'helmet']]],
+    'Semilla alienígena': [AWE, [[0.8, 'catch'], [3.5, 'stretchUp']]],
+    'Visitantes curiosos': [FEAR, [[0.5, 'point'], [1.9, 'star', { tremble: 0.5 }], [6.4, 'wave', { speed: 10 }]]],
+    'Pulpo mecánico': [FEAR, [[0.5, 'shield'], [2, 'flee']]],
+    'Nave nodriza': [AWE, [[1, 'stretchUp']]],
+    'Holograma': [AWE, [[0.6, 'wave', { speed: 8 }]]],
+    'Firma alienígena': [AWE, [[0.5, 'trace']]],
+    'Faro alienígena': [AWE, [[0.5, 'point'], [3.8, 'wave', { speed: 6 }]]],
+    'Ascensor cósmico': [AWE, [[0.6, 'wave', { speed: 4 }], [4, 'beckon']]],
+    'Ciudad flotante': [AWE, [[1, 'helmet'], [4, 'reachBoth']]],
+    'Astronauta perdido': [AWE, [[0.6, 'wave', { speed: 12 }], [4.5, 'reach']]],
+    'Satélite antiguo': [AWE, [[0.6, 'tap'], [3, 'point']]],
+    'Micro agujero negro': [FEAR, [[0.5, 'recoil'], [1.6, 'flee']]],
+    'Teseracto': [AWE, [[0.8, 'helmet'], [3.5, 'trace']]],
+    'Fractura del espacio': [FEAR, [[0.2, 'duck', { tremble: 0.5 }], [5, 'look']]],
+    'Lago de mercurio': [AWE, [[0.6, 'reach'], [4.2, 'tap'], [8, 'reachBoth']]],
+    'Ojo de la tormenta': [FEAR, [[0.5, 'shield'], [3, 'hug']]],
+    'Escalera de Penrose': [AWE, [[0.6, 'look'], [3, 'helmet', { tremble: 0.2 }]]],
+    'Planeta bebé': [AWE, [[0.5, 'catch'], [6.8, 'wave', { speed: 5 }]]],
+    'Cometa': [AWE, [[0.3, 'point'], [2.5, 'star']]],
+    'Lluvia de meteoros': [FEAR, [[0.2, 'duck']]],
+    'Lluvia hacia arriba': [AWE, [[0.6, 'stretchUp'], [4, 'float']]],
+    'Grieta a la Tierra': [AWE, [[1, 'reachBoth', { tremble: 0.15 }], [5, 'hug']]],
+    'Mensaje en las estrellas': [AWE, [[1, 'wave', { speed: 7 }], [4, 'clap']]],
+    'Coro de orbes': [AWE, [[0.8, 'clap']]],
+    'Huellas en la nada': [FEAR, [[0.6, 'look'], [3, 'point']]],
+    'Duplicado de la nave': [AWE, [[0.8, 'point'], [3, 'helmet'], [6.5, 'shake']]],
+    'Señal de radio': [AWE, [[0.6, 'tap'], [3, 'float']]],
+    'Laberinto de luz': [AWE, [[0.6, 'point'], [3.6, 'trace'], [9.6, 'clap']]],
+    'Concierto de púlsares': [AWE, [[0.6, 'shake']]],
+    'Estás aquí': [AWE, [[0.8, 'reach'], [3.5, 'salute']]],
+    'Salida del agujero': [AWE, [[0.6, 'recoil'], [1.6, 'star'], [5, 'reachBoth']]]
+  };
+  function astroReact(def, p){
+    const R = REACT[def.name]; if (!R) return;
+    anim.moment = { mood: R[0], steps: R[1], t0: anim.mt, dur: def.dur, target: p.anchor };
+  }
+  // called from animate(): the pose for the current reaction, or null
+  momentPose = function(){
+    const M = anim.moment; if (!M) return null;
+    const lt = anim.mt - M.t0;
+    if (lt > M.dur){ anim.moment = null; return null; }
+    let st = null; for (const s of M.steps) if (lt >= s[0]) st = s;
+    if (!st) return null;
+    chest.worldToLocal(_g.copy(M.target)); const sd = _g.x >= 0 ? 1 : -1; _g.sub(shoulderOf(sd)).normalize();
+    const o = st[2] || {};
+    let p = GEST[st[1]]({ s: sd, d: _g, t: lt, o });
+    if (o.tremble) p = shakePose(p, lt, o.tremble);
+    anim.react = null; anim.cool = 4;
+    anim.hrT = Math.max(anim.hrT, M.mood === FEAR ? 138 : 108);
+    return p;
+  };
+
+  /* ===== shared touches for every event: a spacetime ripple, a burst of sparks and a glowing haze ===== */
+  const BURST_N = 220, burst = pointsOf(BURST_N, 0.15, HC(1, 1, 1)); burst.p.visible = false; scene.add(burst.p);
+  const bVel = new Float32Array(BURST_N * 3); let bAge = 9;
+  const ripple = { t: 9, p: null };
+  function fireBurst(p){
+    for (let i = 0; i < BURST_N; i++){
+      _rv.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(1.5 + Math.random() * 5.5);
+      bVel[i * 3] = _rv.x; bVel[i * 3 + 1] = _rv.y; bVel[i * 3 + 2] = _rv.z;
+      burst.pos[i * 3] = p.anchor.x; burst.pos[i * 3 + 1] = p.anchor.y; burst.pos[i * 3 + 2] = p.anchor.z;
+    }
+    burst.mat.color.copy(p.color); burst.p.visible = true; bAge = 0; ripple.t = 0; ripple.p = p;
+  }
+  function stepFx(raw, t){
+    if (bAge < 2.2){
+      bAge += raw; const drag = Math.exp(-raw * 2.4);
+      for (let i = 0; i < BURST_N * 3; i++){ bVel[i] *= drag; burst.pos[i] += bVel[i] * raw; }
+      burst.flush(); burst.mat.opacity = Math.max(0, 1 - bAge / 2.2); burst.mat.size = 0.15 * (1 + bAge * 0.6);
+    } else burst.p.visible = false;
+    momentFx.ripA = 0;
+    if (ripple.p && ripple.t < 1.5){
+      ripple.t += raw;
+      _mndc.copy(ripple.p.anchor).project(camera);
+      if (_mndc.z < 1){ momentFx.ripX = _mndc.x * 0.5 + 0.5; momentFx.ripY = _mndc.y * 0.5 + 0.5; momentFx.ripR = ripple.t / 1.5 * 0.9; momentFx.ripA = 1 - ripple.t / 1.5; }
+    }
+    for (const p of points){
+      const a = p.state === 'on' ? env(p.time, p.cur.dur, 1.0, 1.5) : 0;
+      p.aura.visible = a > 0.001;
+      if (p.aura.visible){ p.aura.material.opacity = 0.5 * a; p.aura.material.rotation += raw * 0.05; p.aura.scale.setScalar(10 + 1.5 * Math.sin(t * 0.7)); }
     }
   }
   if (/debug/.test(location.hash)) window.__momentos = {
@@ -2675,10 +2995,10 @@ function init(){
     [bloom.renderTargetBright].concat(bloom.renderTargetsHorizontal || [], bloom.renderTargetsVertical || []).forEach((t) => { if (t && t.texture) t.texture.type = HDR; });
     composer.addPass(bloom);
     finalPass = new THREE.ShaderPass({
-      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2(0.001, 0.001) }, uExposure: { value: 0.95 }, uCA: { value: 0.004 }, uSpeed: { value: 1 }, uSharp: { value: 0.22 }, uLensPos: { value: new THREE.Vector2(0.5, 0.5) }, uLensR: { value: 0 }, uLensK: { value: 0 }, uFreeze: { value: 0 }, uTintA: { value: 0 }, uTintC: { value: new THREE.Color(1, 1, 1) } },
+      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2(0.001, 0.001) }, uExposure: { value: 0.95 }, uCA: { value: 0.004 }, uSpeed: { value: 1 }, uSharp: { value: 0.22 }, uLensPos: { value: new THREE.Vector2(0.5, 0.5) }, uLensR: { value: 0 }, uLensK: { value: 0 }, uFreeze: { value: 0 }, uRip: { value: new THREE.Vector3(0.5, 0.5, 0) }, uRipA: { value: 0 }, uTintA: { value: 0 }, uTintC: { value: new THREE.Color(1, 1, 1) } },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: `
-        uniform sampler2D tDiffuse; uniform float uTime, uExposure, uCA, uSpeed, uSharp, uLensR, uLensK, uFreeze, uTintA; uniform vec2 uRes, uTexel, uLensPos; uniform vec3 uTintC;
+        uniform sampler2D tDiffuse; uniform float uTime, uExposure, uCA, uSpeed, uSharp, uLensR, uLensK, uFreeze, uTintA; uniform vec2 uRes, uTexel, uLensPos; uniform vec3 uTintC, uRip; uniform float uRipA;
         varying vec2 vUv;
         float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
         vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
@@ -2691,6 +3011,12 @@ function init(){
             float d2 = max(dot(lp, lp), 1e-6);
             uv = clamp(vUv + (lp / d2) * uLensK / vec2(asp, 1.0), 0.0, 1.0);
             lensD = sqrt(d2); hole = smoothstep(uLensR * 0.9, uLensR * 1.05, lensD);
+          }
+          float ripW = 0.0;
+          if (uRipA > 0.0){   // a ring of bent space spreading from where an event begins
+            float asp2 = uRes.x / uRes.y; vec2 rd = (vUv - uRip.xy) * vec2(asp2, 1.0); float rr = length(rd);
+            ripW = exp(-pow((rr - uRip.z) / 0.05, 2.0)) * uRipA;
+            uv = clamp(uv + rd / max(rr, 1e-4) / vec2(asp2, 1.0) * ripW * 0.025, 0.0, 1.0);
           }
           vec2 cc = vUv - 0.5;
           vec2 ca = vec2(cc.x * uRes.x / uRes.y, cc.y);
@@ -2709,6 +3035,7 @@ function init(){
           float vig = 1.0 - smoothstep(0.35, 1.15, length(ca) * 1.15);
           if (uFreeze > 0.0){ float lum = dot(col, vec3(0.299, 0.587, 0.114)); col = mix(col, vec3(lum * 0.78, lum * 0.95, lum * 1.2), uFreeze * 0.85); }
           col = mix(col, clamp(col * uTintC * 1.5, 0.0, 1.0), uTintA);
+          col += vec3(0.35, 0.6, 0.9) * ripW * 0.12;
           col *= mix(0.42, 1.0, vig);
           if (uLensK > 0.0){ col *= hole; col += vec3(1.0, 0.85, 0.6) * exp(-pow((lensD - uLensR * 1.5) / (uLensR * 0.15), 2.0)) * 0.5; }
           col = toSRGB(col);
@@ -2780,11 +3107,10 @@ function init(){
   }
   if (window.DeviceOrientationEvent && touchy){
     btnGyro.hidden = false;
-    btnGyro.addEventListener('click', () => { gyro.auto = false; if (gyro.on) setGyro(false); else askGyro(true); });
+    btnGyro.addEventListener('click', () => { if (gyro.on) setGyro(false); else askGyro(true); });
     if (policyBlocked){ btnGyro.textContent = 'Giroscopio no disponible'; setTimeout(() => note(BLOCKED), 1500); }
-    else if (!needsAsk) askGyro(false);   // Android: on from the start
     else {
-      // iOS only grants motion access after a tap: a single tap anywhere asks, and the view stays put until then
+      // the gyroscope starts with a tap anywhere (iOS requires it; every phone works the same way), and the view stays put until then
       controls.enableRotate = false;
       if (MUI.hint) MUI.hint.textContent = 'toca para activar el giroscopio';
       const once = () => {
@@ -2890,6 +3216,7 @@ function init(){
       const u = finalPass.uniforms;
       u.uCA.value = 0.004 + momentFx.ca; u.uLensK.value = momentFx.lensK;
       if (momentFx.lensK > 0){ u.uLensPos.value.set(momentFx.lensX, momentFx.lensY); u.uLensR.value = momentFx.lensR; }
+      u.uRipA.value = momentFx.ripA; u.uRip.value.set(momentFx.ripX, momentFx.ripY, momentFx.ripR);
       u.uFreeze.value = momentFx.freeze; u.uTintA.value = momentFx.tintA; u.uTintC.value.copy(momentFx.tint);
       u.uExposure.value = 0.95 * (1 - 0.5 * momentFx.dim);
     }
