@@ -1135,12 +1135,12 @@ function init(){
     }
   }
 
-  /* ---------- tilt and turn the phone to look around ----------
-     The full device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near
-     upright like raw gamma does. Rotation is measured against the pose the phone had when the
-     gyroscope switched on, and that "center" follows the hand very slowly. */
-  const gyro = { on: false, seen: false, base: null, ty: 0, tp: 0, roll: 0, yaw: 0, pitch: 0, rl: 0 };
-  const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _rel = new THREE.Quaternion(), _ze = new THREE.Vector3(0, 0, 1);
+  /* ---------- tilt the phone to look around ----------
+     The device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near upright.
+     The reading at the moment the gyroscope switches on is the zero point. From there the view
+     follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
+  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
+  const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
   function onTilt(e){
     if (e.beta == null || e.gamma == null) return;
@@ -1150,30 +1150,23 @@ function init(){
     const ang = ((screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0)) * D;
     _de.set(e.beta * D, (e.alpha || 0) * D, -e.gamma * D, 'YXZ');
     _dq.setFromEuler(_de).multiply(_q1).multiply(_q0.setFromAxisAngle(_ze, -ang));
-    if (!gyro.base){ gyro.base = _dq.clone(); }
-    gyro.base.slerp(_dq, 0.0015);
-    _rel.copy(gyro.base).invert().multiply(_dq);
-    _ge.setFromQuaternion(_rel, 'YXZ');
-    gyro.ty = THREE.MathUtils.clamp(_ge.y, -1.3, 1.3);   // turn left/right
-    gyro.tp = THREE.MathUtils.clamp(_ge.x, -0.9, 0.9);   // tilt up/down
-    gyro.roll = THREE.MathUtils.clamp(_ge.z, -0.6, 0.6);
+    if (!gyro.base) gyro.base = _dq.clone();   // zero point, fixed until recalibration (no drift)
+    gyro.rel.copy(gyro.base).invert().multiply(_dq);
   }
   addEventListener('deviceorientation', onTilt);
   const _cp = new THREE.Vector3(), _cq = new THREE.Quaternion(), gsph = new THREE.Spherical();
   function gyroApply(raw){
-    const k = Math.min(1, raw * 9);
-    gyro.yaw += ((gyro.on ? gyro.ty : 0) - gyro.yaw) * k;
-    gyro.pitch += ((gyro.on ? gyro.tp : 0) - gyro.pitch) * k;
-    gyro.rl += ((gyro.on ? gyro.roll : 0) - gyro.rl) * k;
     _cp.copy(camera.position); _cq.copy(camera.quaternion);
-    if (Math.abs(gyro.yaw) + Math.abs(gyro.pitch) + Math.abs(gyro.rl) < 1e-4) return;
-    // swing the camera around the astronaut (strong), then let the lens look into the turn
-    gsph.setFromVector3(off.copy(camera.position).sub(controls.target));
-    gsph.theta -= gyro.yaw * 1.6;
-    gsph.phi = THREE.MathUtils.clamp(gsph.phi + gyro.pitch * 1.3, 0.3, 2.85);
+    if (!gyro.on || !gyro.base) return;
+    // short exponential smoothing in quaternion space (about 50 ms): removes jitter, keeps the response tight
+    gyro.cur.slerp(gyro.rel, 1 - Math.exp(-raw * 20));
+    // the orbit pose at calibration is the reference; the phone's rotation is applied on top of it
+    if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
+    _ge.setFromQuaternion(gyro.cur, 'YXZ');
+    // 1:1 mapping: turning the phone by X degrees turns the view by X degrees
+    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x, 0.3, 2.85), gyro.cal.theta - _ge.y);
     camera.position.copy(controls.target).add(off.setFromSpherical(gsph));
     camera.lookAt(controls.target);
-    camera.rotateY(gyro.yaw * 0.35); camera.rotateX(gyro.pitch * 0.3); camera.rotateZ(gyro.rl * 0.5);
   }
   function gyroRestore(){ camera.position.copy(_cp); camera.quaternion.copy(_cq); }
 
@@ -1312,7 +1305,7 @@ function init(){
   let noteTimer = 0;
   function note(msg){ gyroNote.textContent = msg; gyroNote.hidden = false; clearTimeout(noteTimer); noteTimer = setTimeout(() => { gyroNote.hidden = true; }, 9000); }
   const BLOCKED = 'El visor donde se abre esta página bloquea los sensores de movimiento. Ábrela en tu propia web (con https) y el giroscopio funcionará.';
-  function setGyro(v){ gyro.on = v; gyro.base = null; btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
+  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v) setCine(false); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
   async function askGyro(fromTap){
     if (needsAsk){
       try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted'){ if (fromTap) note('Permiso de movimiento denegado. Actívalo en Ajustes › Safari › Movimiento y orientación.'); return; } }
