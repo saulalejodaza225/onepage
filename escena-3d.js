@@ -1158,13 +1158,14 @@ function init(){
      The device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near upright.
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
-  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
+  const gyro = { on: false, seen: false, auto: true, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
   function onTilt(e){
     if (e.beta == null || e.gamma == null) return;
     gyro.seen = true;
-    if (!gyro.on) return;
+    // the sensor is already talking (Android, or iOS with access granted earlier): switch on with the page
+    if (!gyro.on){ if (!gyro.auto) return; gyro.auto = false; setGyro(true); }
     const D = Math.PI / 180;
     const ang = ((screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0)) * D;
     _de.set(e.beta * D, (e.alpha || 0) * D, -e.gamma * D, 'YXZ');
@@ -2779,7 +2780,7 @@ function init(){
   }
   if (window.DeviceOrientationEvent && touchy){
     btnGyro.hidden = false;
-    btnGyro.addEventListener('click', () => { if (gyro.on) setGyro(false); else askGyro(true); });
+    btnGyro.addEventListener('click', () => { gyro.auto = false; if (gyro.on) setGyro(false); else askGyro(true); });
     if (policyBlocked){ btnGyro.textContent = 'Giroscopio no disponible'; setTimeout(() => note(BLOCKED), 1500); }
     else if (!needsAsk) askGyro(false);   // Android: on from the start
     else {
