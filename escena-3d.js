@@ -2423,39 +2423,136 @@ function init(){
 
   /* ===== group 5 · signals ===== */
   const SIGNALS = [
-    { name: 'Grieta a la Tierra', line: 'Por una grieta se ve Bogotá de noche, con Monserrate encendido.', dur: 9.5, make(P){
-      const G = newGroup(), W = 768, H = 512, city = makeCanvas(W, H), cg = city.getContext('2d');
-      { const sky = cg.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#060a1c'); sky.addColorStop(0.55, '#1b2350'); sky.addColorStop(0.75, '#3a2a4a'); cg.fillStyle = sky; cg.fillRect(0, 0, W, H);
-        for (let i = 0; i < 120; i++){ cg.fillStyle = 'rgba(255,255,255,' + (0.3 + Math.random() * 0.6) + ')'; cg.fillRect(Math.random() * W, Math.random() * H * 0.4, 1.5, 1.5); }
-        // the eastern hills, Monserrate the highest, with its white church lit on top and the cable car line
-        cg.fillStyle = '#0a0d16'; cg.beginPath(); cg.moveTo(0, 300); cg.lineTo(90, 250); cg.lineTo(170, 215); cg.lineTo(250, 160); cg.lineTo(300, 150); cg.lineTo(360, 190); cg.lineTo(450, 175); cg.lineTo(540, 215); cg.lineTo(650, 230); cg.lineTo(W, 260); cg.lineTo(W, H); cg.lineTo(0, H); cg.fill();
-        cg.fillStyle = '#fff6dc'; cg.shadowColor = '#ffe9a8'; cg.shadowBlur = 14; cg.fillRect(268, 138, 22, 12); cg.fillRect(276, 126, 6, 12); cg.shadowBlur = 0;
-        cg.strokeStyle = 'rgba(255,220,150,0.6)'; cg.lineWidth = 1.5; cg.setLineDash([3, 5]); cg.beginPath(); cg.moveTo(279, 152); cg.lineTo(200, 300); cg.stroke(); cg.setLineDash([]);
-        // the city spread over the savanna: warm lights denser toward the viewer, a few avenues
-        for (let i = 0; i < 2600; i++){ const y = 300 + Math.pow(Math.random(), 0.7) * (H - 300), s = 0.8 + (y - 300) / 160; cg.fillStyle = Math.random() < 0.82 ? 'rgba(255,190,110,' + (0.5 + Math.random() * 0.5) + ')' : 'rgba(200,230,255,0.85)'; cg.fillRect(Math.random() * W, y, s, s); }
-        cg.strokeStyle = 'rgba(255,170,80,0.75)'; cg.lineWidth = 2; for (let k = 0; k < 6; k++){ cg.beginPath(); cg.moveTo(Math.random() * W, H); cg.lineTo(330 + (Math.random() - 0.5) * 200, 300); cg.stroke(); }
-        cg.fillStyle = '#ff3a2a'; [[520, 270], [560, 262], [600, 280]].forEach(([x, y]) => { cg.fillRect(x, y, 3, 3); });
+    { name: 'Grieta a la Tierra', line: 'Una grieta se abre sobre Bogotá de noche… y caes hacia sus luces, con Monserrate encendido.', dur: 12.5, make(P){
+      // the city is painted once on a large canvas (design units 2048×1365, drawn at 1.5×);
+      // the crack shows a moving, zooming window onto it, with traffic and lights animated on top
+      const DW = 2048, DH = 1365, SC = 1.5, HZ = 560, VPX = 1010;   // horizon height and vanishing point of the savanna
+      const city = makeCanvas(DW * SC, DH * SC), cg = city.getContext('2d'); cg.scale(SC, SC);
+      const rnd = mulberry32(4711);   // the same city every time
+      const TOWERS = [];   // tall buildings, for the blinking red lights
+      {
+        // sky: deep night above, the orange glow of the city along the hills
+        const sky = cg.createLinearGradient(0, 0, 0, HZ + 80); sky.addColorStop(0, '#03060f'); sky.addColorStop(0.45, '#0d1433'); sky.addColorStop(0.8, '#2b2346'); sky.addColorStop(1, '#5a3a3a');
+        cg.fillStyle = sky; cg.fillRect(0, 0, DW, HZ + 80);
+        for (let i = 0; i < 420; i++){ const y = rnd() * HZ * 0.75; cg.fillStyle = 'rgba(255,255,255,' + (0.2 + rnd() * 0.7) * (1 - y / HZ) + ')'; const s = rnd() < 0.08 ? 2.2 : 1.2; cg.fillRect(rnd() * DW, y, s, s); }
+        for (let i = 0; i < 9; i++){   // low clouds lit from below
+          const x = rnd() * DW, y = 120 + rnd() * 260, rx = 160 + rnd() * 260, ry = 26 + rnd() * 34;
+          const g = cg.createRadialGradient(x, y + ry * 0.5, 4, x, y, rx); g.addColorStop(0, 'rgba(255,150,90,0.16)'); g.addColorStop(0.5, 'rgba(120,80,110,0.09)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+          cg.fillStyle = g; cg.beginPath(); cg.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); cg.fill();
+        }
+        // the eastern hills in three layers; Monserrate (left peak) and Guadalupe (right peak)
+        const ridge = (pts, col) => { cg.fillStyle = col; cg.beginPath(); cg.moveTo(0, DH); pts.forEach(([x, y]) => cg.lineTo(x, y)); cg.lineTo(DW, DH); cg.fill(); };
+        const jag = (base, amp, peaks) => { const pts = []; for (let x = 0; x <= DW; x += 16){ let y = base + Math.sin(x * 0.004) * 18 + (rnd() - 0.5) * 10; peaks.forEach(([px, py, w]) => { y = Math.min(y, py + Math.pow(Math.abs(x - px) / w, 1.4) * amp); }); pts.push([x, y]); } return pts; };
+        ridge(jag(430, 120, [[600, 330, 420], [1500, 360, 480]]), '#0d1426');
+        ridge(jag(470, 150, [[905, 300, 300], [1260, 330, 330]]), '#0a1020');
+        ridge(jag(530, 60, [[300, 470, 380], [1750, 480, 400]]), '#080d19');
+        // the church on Monserrate and the statue on Guadalupe, both lit; the cable car and funicular down the hill
+        cg.save(); cg.shadowColor = '#fff1c8'; cg.shadowBlur = 22; cg.fillStyle = '#fff6df';
+        cg.fillRect(888, 286, 34, 16); cg.fillRect(898, 270, 12, 18); cg.beginPath(); cg.moveTo(898, 270); cg.lineTo(904, 258); cg.lineTo(910, 270); cg.fill();
+        cg.fillRect(1257, 312, 5, 20); cg.beginPath(); cg.arc(1259.5, 309, 4, 0, Math.PI * 2); cg.fill(); cg.restore();
+        cg.strokeStyle = 'rgba(255,220,150,0.65)'; cg.lineWidth = 1.6; cg.setLineDash([3, 6]);
+        cg.beginPath(); cg.moveTo(905, 305); cg.lineTo(830, 560); cg.stroke(); cg.beginPath(); cg.moveTo(912, 305); cg.quadraticCurveTo(900, 450, 870, 565); cg.stroke(); cg.setLineDash([]);
+        for (let i = 0; i < 380; i++){ const x = rnd() * DW, y = 440 + rnd() * 140; cg.fillStyle = 'rgba(255,200,130,' + (0.25 + rnd() * 0.5) + ')'; cg.fillRect(x, y, 1.6, 1.6); }   // houses on the slopes
+        // the savanna: glow, then blocks of buildings receding in perspective
+        const glow = cg.createLinearGradient(0, HZ - 20, 0, DH); glow.addColorStop(0, 'rgba(255,140,70,0.35)'); glow.addColorStop(0.25, 'rgba(60,40,60,0.6)'); glow.addColorStop(1, 'rgba(8,10,20,1)');
+        cg.fillStyle = glow; cg.fillRect(0, HZ - 20, DW, DH - HZ + 20);
+        let y = HZ + 2;
+        while (y < DH){
+          const depth = (y - HZ) / (DH - HZ), s = 0.25 + depth * 2.6, rowH = 3 + depth * 26;
+          let x = -rnd() * 40 * s;
+          while (x < DW){
+            const w = (18 + rnd() * 34) * s, h = (6 + rnd() * 22) * s * (Math.abs(x - VPX) < 260 && depth < 0.3 ? 2.4 : 1);
+            cg.fillStyle = 'rgb(' + (10 + rnd() * 8 | 0) + ',' + (12 + rnd() * 8 | 0) + ',' + (22 + rnd() * 10 | 0) + ')';
+            cg.fillRect(x, y - h, w, h + rowH);
+            const ws = Math.max(1, 1.1 + 0.8 * s), gap = ws * 2.3;   // lit windows (far away, just a few dots)
+            if (s < 0.7){ for (let q = 0; q < 3; q++) if (rnd() < 0.7){ cg.fillStyle = 'rgba(255,196,120,' + (0.5 + rnd() * 0.5) + ')'; cg.fillRect(x + rnd() * w, y - h + rnd() * h, 1.4, 1.4); } }
+            else for (let wy = y - h + gap; wy < y + rowH * 0.6; wy += gap) for (let wx = x + gap * 0.6; wx < x + w - ws; wx += gap){
+              if (rnd() < 0.42){ const warm = rnd(); cg.fillStyle = warm < 0.7 ? 'rgba(255,196,120,' + (0.55 + rnd() * 0.45) + ')' : warm < 0.92 ? 'rgba(210,230,255,0.85)' : 'rgba(255,240,200,1)'; cg.fillRect(wx, wy, ws, ws * 0.8); }
+            }
+            x += w + (2 + rnd() * 8) * s;
+          }
+          y += rowH * (0.9 + rnd() * 0.3);
+        }
+        // the downtown towers at the foot of the hills: Colpatria (left) and BD Bacatá (right), plus a few more
+        const tower = (x, base, w, h, lit) => {
+          cg.fillStyle = '#0a0e1a'; cg.fillRect(x, base - h, w, h);
+          for (let wy = base - h + 6; wy < base; wy += 5) for (let wx = x + 3; wx < x + w - 3; wx += 4) if (rnd() < lit){ cg.fillStyle = rnd() < 0.8 ? 'rgba(255,214,150,0.9)' : 'rgba(200,225,255,0.9)'; cg.fillRect(wx, wy, 2, 2.4); }
+          TOWERS.push([x + w / 2, base - h]);
+        };
+        tower(930, 640, 26, 150, 0.35); tower(975, 645, 22, 120, 0.4); tower(1012, 650, 34, 245, 0.25);   // Colpatria
+        tower(1080, 648, 20, 270, 0.35); tower(1104, 648, 20, 250, 0.35);   // the twin BD Bacatá
+        tower(1150, 652, 30, 140, 0.45); tower(1200, 655, 24, 110, 0.5); tower(880, 652, 24, 100, 0.5);
+        // avenues: lines of sodium light running to the vanishing point
+        cg.lineCap = 'round';
+        [-1500, -900, -420, 120, 560, 1100, 1800, 2600].forEach((bx) => {
+          const g = cg.createLinearGradient(0, DH, 0, HZ); g.addColorStop(0, 'rgba(255,170,80,0.95)'); g.addColorStop(1, 'rgba(255,170,80,0.15)');
+          cg.strokeStyle = g; cg.lineWidth = 3.2; cg.beginPath(); cg.moveTo(bx, DH); cg.lineTo(VPX + (bx - VPX) * 0.04, HZ + 8); cg.stroke();
+        });
+        for (let k = 1; k < 9; k++){ const yy = HZ + Math.pow(k / 9, 1.8) * (DH - HZ); cg.strokeStyle = 'rgba(255,175,95,' + (0.18 + k * 0.04) + ')'; cg.lineWidth = 0.6 + k * 0.18; cg.beginPath(); cg.moveTo(0, yy + Math.sin(k) * 6); cg.lineTo(DW, yy - Math.sin(k) * 6); cg.stroke(); }
       }
-      const L = liveTex(W, H);
-      G.add(new THREE.Mesh(new THREE.PlaneGeometry(6, 4), new THREE.MeshBasicMaterial({ map: L.tx, fog: false, transparent: true, depthWrite: false, side: THREE.DoubleSide })));
+      // moving cars along the avenues (white heading out, red heading in)
+      const AVE = [-1500, -900, -420, 120, 560, 1100, 1800, 2600], cars = [];
+      for (let i = 0; i < 140; i++) cars.push({ a: AVE[(rnd() * AVE.length) | 0], k: rnd(), v: (0.02 + rnd() * 0.04) * (rnd() < 0.5 ? 1 : -1), side: rnd() < 0.5 ? -1 : 1 });
+      const W = 1024, H = 683, L = liveTex(W, H);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(6, 4), new THREE.MeshBasicMaterial({ map: L.tx, fog: false, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+      const G = newGroup(); G.add(plane);
       let crack = [];
-      const widthAt = (i, y, w) => w * (110 + 60 * Math.sin(i * 1.7)) * Math.sin(Math.PI * THREE.MathUtils.clamp(y / H, 0.05, 0.95));
-      function draw(w){
+      const halfW = (i, y, w) => w * (95 + 55 * Math.sin(i * 1.7)) * Math.sin(Math.PI * THREE.MathUtils.clamp(y / H, 0.04, 0.96));
+      function draw(lt, w, open, zoom){
         const g = L.g; g.clearRect(0, 0, W, H);
-        if (w > 0.001){
-          g.save(); g.beginPath();
-          crack.forEach(([x, y], i) => { const ww = widthAt(i, y, w); if (i) g.lineTo(x - ww, y); else g.moveTo(x - ww, y); });
-          for (let i = crack.length - 1; i >= 0; i--){ const [x, y] = crack[i]; g.lineTo(x + widthAt(i, y, w) * 0.8, y); }
-          g.closePath();
-          g.save(); g.clip(); g.drawImage(city, 0, 0); g.restore();
-          g.strokeStyle = '#fff1d6'; g.shadowColor = '#ffb46a'; g.shadowBlur = 22; g.lineWidth = 4; g.stroke(); g.restore();
+        if (w <= 0.001){ L.tx.needsUpdate = true; return; }
+        // the window onto the city drifts from the whole view to the downtown towers
+        const f = easeIO(THREE.MathUtils.clamp((zoom - 1) / 2.4, 0, 1));
+        const cx = lerp(DW / 2, 1060, f), cy = lerp(DH * 0.52, 560, f), sw = DW / zoom, sh = sw * H / W;
+        const sx = cx - sw / 2, sy = cy - sh / 2, k = W / sw;
+        g.save(); g.beginPath();
+        crack.forEach(([x, y], i) => { const hw = lerp(halfW(i, y, w), W, open); if (i) g.lineTo(x - hw, y); else g.moveTo(x - hw, y); });
+        for (let i = crack.length - 1; i >= 0; i--){ const [x, y] = crack[i]; g.lineTo(x + lerp(halfW(i, y, w) * 0.8, W, open), y); }
+        g.closePath(); g.save(); g.clip();
+        g.drawImage(city, sx * SC, sy * SC, sw * SC, sh * SC, 0, 0, W, H);
+        // traffic and blinking lights, mapped through the same window
+        const px = (x) => (x - sx) * k, py = (y) => (y - sy) * k;
+        cars.forEach((c) => {
+          c.k = (c.k + c.v * 0.016 + 1) % 1;
+          const t2 = Math.pow(c.k, 1.9), y = DH - t2 * (DH - HZ - 8), x = c.a + (VPX + (c.a - VPX) * 0.04 - c.a) * t2 + c.side * 3 * (1 - t2);
+          const r = Math.max(0.8, (1.6 - t2 * 1.2) * k * 0.9);
+          g.fillStyle = c.v > 0 ? 'rgba(255,245,220,0.95)' : 'rgba(255,60,50,0.95)'; g.beginPath(); g.arc(px(x), py(y), r, 0, Math.PI * 2); g.fill();
+        });
+        const blink = (lt % 1.4) < 0.5;
+        if (blink){ g.fillStyle = '#ff2a20'; TOWERS.forEach(([x, y]) => { g.beginPath(); g.arc(px(x), py(y - 2), Math.max(1.2, 1.4 * k), 0, Math.PI * 2); g.fill(); }); }
+        // the crown of Colpatria changes colour, as it does at night
+        const hue = (lt * 40) % 360; g.fillStyle = 'hsla(' + hue + ',90%,60%,0.85)';
+        g.fillRect(px(1012), py(650 - 245), 34 * k, 10 * k); g.fillStyle = 'hsla(' + ((hue + 120) % 360) + ',90%,60%,0.6)'; g.fillRect(px(1012), py(650 - 120), 34 * k, 4 * k);
+        g.restore();
+        // a hot, glowing rim on the crack; once it is wide open the picture fades softly at its edges
+        if (open < 0.98){ g.strokeStyle = 'rgba(255,241,214,' + (1 - open) + ')'; g.shadowColor = '#ffb46a'; g.shadowBlur = 24; g.lineWidth = 4; g.stroke(); }
+        g.restore();
+        if (open > 0.02){
+          g.save(); g.globalCompositeOperation = 'destination-in';
+          const m = g.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.62); m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,' + (1 - open) + ')');
+          g.fillStyle = m; g.fillRect(0, 0, W, H); g.restore();
         }
         L.tx.needsUpdate = true;
       }
+      const home = new THREE.Vector3(), near = new THREE.Vector3();
       let acc = 0;
       return {
-        start(){ crack = []; for (let y = -20; y < H + 20; y += 30 + Math.random() * 40) crack.push([W / 2 + (Math.random() - 0.5) * 90, y]); G.position.copy(P.anchor); faceCam(G); G.visible = true; draw(0); },
-        update(lt, raw, t){ const w = easeIO(smooth(0.4, 2.5, lt)) * (1 - easeIO(smooth(7.0, 9.0, lt))); acc += raw; if (acc > 1 / 30){ acc = 0; draw(w); } momentFx.ca += 0.02 * smooth(0.4, 0.8, lt) * (1 - smooth(0.8, 1.6, lt)); },
+        start(){
+          crack = []; for (let y = -20; y < H + 20; y += 26 + Math.random() * 34) crack.push([W / 2 + (Math.random() - 0.5) * 80, y]);
+          home.copy(P.anchor); G.position.copy(home); faceCam(G); G.visible = true; draw(0, 0, 0, 1);
+        },
+        update(lt, raw, t){
+          const D = 12.5;
+          const w = easeIO(smooth(0.4, 2.2, lt)) * (1 - easeIO(smooth(10.2, 12.0, lt)));
+          const dive = easeIO(smooth(2.4, 7.4, lt)) * (1 - easeIO(smooth(9.0, 11.2, lt)));   // falling toward the city, then pulled back out
+          const open = smooth(0.1, 0.75, dive), zoom = 1 + 2.4 * dive;
+          // the window comes toward you and grows until it fills the view
+          near.copy(camera.position).sub(home).multiplyScalar(0.55).add(home);
+          G.position.lerpVectors(home, near, dive); faceCam(G); G.scale.setScalar(1 + 0.35 * dive);
+          acc += raw; if (acc > 1 / 30){ acc = 0; draw(lt, w, open, zoom); }
+          momentFx.ca += 0.02 * smooth(0.4, 0.8, lt) * (1 - smooth(0.8, 1.6, lt)) + 0.012 * smooth(2.4, 3.2, lt) * (1 - smooth(3.2, 4.5, lt));
+          momentFx.dim -= 0.25 * dive;   // the city light spills into the scene
+        },
         end(){ G.visible = false; }
       };
     } },
@@ -2902,7 +2999,7 @@ function init(){
     'Cometa': [AWE, [[0.3, 'point'], [2.5, 'star']]],
     'Lluvia de meteoros': [FEAR, [[0.2, 'duck']]],
     'Lluvia hacia arriba': [AWE, [[0.6, 'stretchUp'], [4, 'float']]],
-    'Grieta a la Tierra': [AWE, [[1, 'reachBoth', { tremble: 0.15 }], [5, 'hug']]],
+    'Grieta a la Tierra': [AWE, [[1, 'reachBoth', { tremble: 0.15 }], [3.5, 'star'], [9.5, 'hug']]],
     'Mensaje en las estrellas': [AWE, [[1, 'wave', { speed: 7 }], [4, 'clap']]],
     'Coro de orbes': [AWE, [[0.8, 'clap']]],
     'Huellas en la nada': [FEAR, [[0.6, 'look'], [3, 'point']]],
