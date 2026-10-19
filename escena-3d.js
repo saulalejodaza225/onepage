@@ -1185,6 +1185,7 @@ function init(){
      The device attitude (alpha/beta/gamma) becomes a quaternion, so it never flips near upright.
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
+  const GYRO_GAIN = 1.9;
   const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
@@ -1205,12 +1206,12 @@ function init(){
     _cp.copy(camera.position); _cq.copy(camera.quaternion);
     if (!gyro.on || !gyro.base) return;
     // short exponential smoothing in quaternion space (about 50 ms): removes jitter, keeps the response tight
-    gyro.cur.slerp(gyro.rel, 1 - Math.exp(-raw * 20));
+    gyro.cur.slerp(gyro.rel, 1 - Math.exp(-raw * 14));   // a touch more smoothing, since the movement is amplified
     // the orbit pose at calibration is the reference; the phone's rotation is applied on top of it
     if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
     _ge.setFromQuaternion(gyro.cur, 'YXZ');
-    // 1:1 mapping: turning the phone by X degrees turns the view by X degrees
-    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x, 0.3, 2.85), gyro.cal.theta + _ge.y);
+    // amplified: turning the phone by X degrees turns the view by about 2X, so there is no need to twist it far
+    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x * GYRO_GAIN, 0.3, 2.85), gyro.cal.theta + _ge.y * GYRO_GAIN);
     camera.position.copy(controls.target).add(off.setFromSpherical(gsph));
     camera.lookAt(controls.target);
   }
@@ -3018,7 +3019,7 @@ function init(){
 
   /* ===== group 5 · signals ===== */
   const SIGNALS = [
-    { name: 'Grieta a la Tierra', line: 'Una grieta se abre sobre Bogotá… y caes hacia Monserrate, con toda la ciudad a sus pies.', dur: 13, prewarm: true, make(P){
+    { name: 'Grieta a la Tierra', line: 'Una grieta se abre sobre Bogotá… y caes hacia Monserrate, con toda la ciudad a sus pies.', dur: 17, prewarm: true, make(P){
       const job = (function* (){
       /* a small Bogotá in 3D, filmed by its own drone camera into a texture and seen through the crack: the sanctuary of
          Monserrate on its summit (white walls, red tile roofs, the round apse, the bell tower), the forest of the eastern
@@ -3263,14 +3264,15 @@ function init(){
       }
       /* the drone: high behind the apse (the classic view), over the nave and past the tower, then down the slope into the
          towers of the centre */
-      const camP = new THREE.CatmullRomCurve3([V(5.5, 7.6, 11.5), V(5, 6.2, 5.5), V(2.5, 4.4, -1.5), V(2.4, 2.6, -10.5), V(4, -16, -33), V(3, -37, -57)]);
-      const camT = new THREE.CatmullRomCurve3([V(0, 0.4, -4.5), V(0, 2.6, -4.5), V(-0.5, 2.5, -40), V(6, -22, -60), V(16, -40, -90), V(24, -40, -100)]);
+      const camP = new THREE.CatmullRomCurve3([V(5.5, 7.6, 11.5), V(-7.2, 5.2, 6.8), V(2.6, 4.8, 1.0), V(2.6, 3.6, -9.5), V(4, -16, -33), V(3, -37, -57)]);
+      const camT = new THREE.CatmullRomCurve3([V(0, 0.4, -4.5), V(-1, 0.6, -1), V(-0.3, 3.4, -6.0), V(5, -18, -60), V(16, -40, -90), V(24, -40, -100)]);
+      const KT = [3.0, 6.0, 8.6, 10.4, 12.0, 13.6];   // when the drone reaches each key
       const dcam = new THREE.PerspectiveCamera(52, 1.5, 0.1, 2400), look = new THREE.Vector3();
       const rt = new THREE.WebGLRenderTarget(1100, 734, { samples: gl2 ? 2 : 0 });   // light on memory: 8-bit colour, a little antialiasing
-      function film(t, k){
+      function film(t, k, qs){
         camP.getPoint(k, dcam.position); camT.getPoint(k, look);
         dcam.position.x += 0.25 * Math.sin(t * 0.7); dcam.position.y += 0.15 * Math.sin(t * 0.9 + 1);   // a drone never holds perfectly still
-        dcam.lookAt(look); dcam.updateMatrixWorld();
+        dcam.lookAt(look); if (qs) dcam.quaternion.multiply(qs); dcam.updateMatrixWorld();
         skyM.uniforms.uT.value = t;
         flag.rotation.y = 0.35 * Math.sin(t * 3.1) + 0.15 * Math.sin(t * 7.3);
         cable.getPoint((t * 0.03) % 1, cabin.position);
@@ -3321,7 +3323,8 @@ function init(){
         dio.children = kids; renderer.debug.checkShaderErrors = ce; }
       yield;
       const home = new THREE.Vector3(), near = new THREE.Vector3(), fwd = new THREE.Vector3(), faceQ = new THREE.Quaternion();
-      let acc = 0;
+      const qRef = new THREE.Quaternion(), qD = new THREE.Quaternion(), qS = new THREE.Quaternion(), qI = new THREE.Quaternion();
+      let acc = 0, kf = 0, lookRef = false;
       return {
         start(t){
           crack = []; for (let y = -20; y < H + 20; y += 26 + Math.random() * 34) crack.push([W / 2 + (Math.random() - 0.5) * 80, y]);
@@ -3329,22 +3332,35 @@ function init(){
           const asp = THREE.MathUtils.clamp(camera.aspect, 0.55, 1.7);
           plane.scale.set(4 * asp, 4, 1);
           if (asp < 1) rt.setSize(Math.round(960 * asp), 960); else rt.setSize(1100, Math.round(1100 / asp));
-          dcam.aspect = asp; dcam.fov = asp < 1 ? 68 : 52; dcam.updateProjectionMatrix();
-          home.copy(P.anchor); G.position.copy(home); faceCam(G); G.visible = true; acc = 1;
+          dcam.aspect = asp; dcam.fov = asp < 1 ? 68 : 52; dcam.filmOffset = asp < 1 ? -3 : 0; dcam.updateProjectionMatrix();   // upright phones: the subject sits a little right of centre, clear of the astronaut
+          home.copy(P.anchor); G.position.copy(home); faceCam(G); G.visible = true; acc = 1; kf = 0; lookRef = false; qS.identity();
           film(t || 0, 0); drawMask(0, 0);
         },
         update(lt, raw, t){
-          let w = easeIO(smooth(0.4, 2.2, lt)) * (1 - easeIO(smooth(11.2, 12.8, lt)));
-          let dive = easeIO(smooth(2.2, 8.4, lt)) * (1 - easeIO(smooth(9.8, 11.8, lt)));   // down into the city, a moment among the towers, then pulled back out
-          let path = dive; if (this.peek != null){ w = 1; dive = 1; path = this.peek; }   // debug: any point of the flight, full screen
-          const open = smooth(0.08, 0.7, dive);
+          // the crack opens; the portal comes forward with the classic view of Monserrate and opens wide; only then the drone sets off
+          let w = easeIO(smooth(0.3, 1.6, lt)) * (1 - easeIO(smooth(15.4, 16.8, lt)));
+          let win = easeIO(smooth(1.4, 3.4, lt)) * (1 - easeIO(smooth(14.8, 16.2, lt)));
+          let i = 0; while (i < KT.length - 2 && lt > KT[i + 1]) i++;
+          let kT = lt <= KT[0] ? 0 : Math.min(1, (i + THREE.MathUtils.clamp((lt - KT[i]) / (KT[i + 1] - KT[i]), 0, 1)) / (KT.length - 1));
+          if (this.peek != null){ w = 1; win = 1; kT = kf = this.peek; }   // debug: any point of the flight
+          kf += (kT - kf) * (1 - Math.exp(-raw * 2.2));   // eased, so the drone never jerks from one key to the next
+          const open = smooth(0.15, 0.85, win);
+          // the portal stops just behind the astronaut and fills most of the view, never the whole of it: the astronaut stays in front, looking in
           camera.getWorldDirection(fwd);
-          near.copy(camera.position).addScaledVector(fwd, 2.7 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.82);   // close enough to overfill the screen
-          G.position.lerpVectors(home, near, dive); faceCam(G); faceQ.copy(G.quaternion); G.quaternion.copy(faceQ).slerp(camera.quaternion, dive); G.scale.setScalar(1 + 0.35 * dive);
+          const dP = Math.max(_ms.copy(astro.position).sub(camera.position).dot(fwd) + 2.6, 5.5);
+          const fillS = 2 * dP * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / 4 * 0.9;
+          near.copy(camera.position).addScaledVector(fwd, dP);
+          G.position.lerpVectors(home, near, win); faceCam(G); faceQ.copy(G.quaternion); G.quaternion.copy(faceQ).slerp(camera.quaternion, win); G.scale.setScalar(lerp(1, fillS, win));
+          // with the portal open, turning the phone looks around inside Bogotá
+          if (win > 0.5){ if (!lookRef){ qRef.copy(camera.quaternion); lookRef = true; } qD.copy(qRef).invert().multiply(camera.quaternion); qI.identity().slerp(qD, 0.9); }
+          else { lookRef = false; qI.identity(); }
+          qS.slerp(qI, 1 - Math.exp(-raw * 6));
           acc += raw;
-          if (acc > 1 / 30){ acc = 0; if (w > 0.001) film(t, path); drawMask(w, open); }
-          momentFx.ca += 0.02 * smooth(0.4, 0.8, lt) * (1 - smooth(0.8, 1.6, lt)) + 0.012 * smooth(2.2, 3.0, lt) * (1 - smooth(3.0, 4.3, lt));
-          momentFx.dim -= 0.25 * dive;   // the light of the city spills into the tunnel
+          if (acc > 1 / 30){ acc = 0; if (w > 0.001) film(t, kf, qS); drawMask(w, open); }
+          momentFx.look.copy(G.position); momentFx.lookOn = true;   // the astronaut watches the portal
+          _mp.set(1, 0, 0).applyQuaternion(camera.quaternion); momentFx.astro.addScaledVector(_mp, -0.6 * win); _mp.set(0, 1, 0).applyQuaternion(camera.quaternion); momentFx.astro.addScaledVector(_mp, -0.3 * win);   // and drifts to the side, so the view of the city stays clear
+          momentFx.ca += 0.02 * smooth(0.3, 0.7, lt) * (1 - smooth(0.7, 1.5, lt)) + 0.01 * smooth(1.4, 2.2, lt) * (1 - smooth(2.2, 3.4, lt));
+          momentFx.dim -= 0.25 * win;   // the light of the city spills into the tunnel
         },
         end(){ G.visible = false; }
       };
@@ -3806,7 +3822,7 @@ function init(){
     const go = (dl) => { try { while (!d.inst.step()){ if (dl.timeRemaining() < 3){ idle(go); return; } } } catch (err){ console.error(err); } };   // a few milliseconds at a time
     idle(go);
   })), 3500);
-  const GAZE = Math.cos(D2R(9)), NEAR = Math.cos(D2R(16)), DWELL = 0.55;
+  const GAZE = Math.cos(D2R(15)), NEAR = Math.cos(D2R(26)), DWELL = 0.55;
   let found = 0;
   const cineOn = () => { try { return cine; } catch (err){ return false; } };   // declared further down, with the UI
   /* tap a light to play it: a short tap (not a drag) close to where the light is on screen */
@@ -4018,7 +4034,7 @@ function init(){
     'Cometa': [AWE, [[0.3, 'point'], [2.5, 'star']]],
     'Lluvia de meteoros': [AWE, [[0.2, 'look'], [2.5, 'point']]],
     'Lluvia hacia arriba': [AWE, [[0.6, 'stretchUp'], [3.5, 'float'], [7.5, 'star']]],
-    'Grieta a la Tierra': [AWE, [[1, 'reachBoth', { tremble: 0.15 }], [3.5, 'star'], [9.5, 'float']]],
+    'Grieta a la Tierra': [AWE, [[1, 'reachBoth', { tremble: 0.15 }], [3.6, 'gasp'], [6.4, 'point'], [10.4, 'star'], [14.6, 'float']]],
     'Mensaje en las estrellas': [AWE, [[1, 'wave', { speed: 7 }], [4, 'clap']]],
     'Coro de orbes': [AWE, [[0.6, 'gasp'], [1.6, 'conduct'], [11.5, 'star']]],
     'Huellas en la nada': [FEAR, [[0.6, 'look'], [3, 'point']]],
@@ -4078,7 +4094,7 @@ function init(){
     'Laberinto de luz': (lt) => { momentFx.dim += 0.65 * env(lt, 12.5, 1.2, 1.5); },   // the lights go out so the maze glows alone
     'Estás aquí': (lt) => { momentFx.dim += 0.35 * env(lt, 12, 1, 1.2); },
     'Salida del agujero': (lt, raw, t, p) => { pullTo(p.anchor, 1.2 * smooth(1, 2.5, lt) * (1 - smooth(6, 8, lt))); },   // the other side draws you in
-    'Grieta a la Tierra': (lt) => { const k = smooth(2.6, 6, lt) * (1 - smooth(10, 12, lt)); tintTo(1.0, 0.82, 0.6, 0.16 * k); }   // the sunset over the city warms the tunnel
+    'Grieta a la Tierra': (lt) => { const k = smooth(2.6, 6, lt) * (1 - smooth(14.6, 16.4, lt)); tintTo(1.0, 0.82, 0.6, 0.16 * k); }   // the sunset over the city warms the tunnel
   };
   function astroReact(def, p){
     const R = REACT[def.name]; if (!R) return;
@@ -4135,7 +4151,7 @@ function init(){
   if (/debug/.test(location.hash)) window.__momentos = {
     play: (pi, si) => playPoint(points[pi], si),
     look(pi){ setCine(false); camera.position.copy(MT).addScaledVector(points[pi].out, -4.15); camera.lookAt(MT); },
-    points, momentFx, camera, astro, residents, step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
+    points, momentFx, camera, astro, residents, gyro, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
   };
 
   /* ---------- lights ---------- */
