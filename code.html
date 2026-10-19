@@ -87,13 +87,12 @@
     #gyro-note[hidden] { display: none; }
     #moments-hud { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); z-index: 3; display: block; max-width: calc(100% - 32px); padding: 7px 14px; border-radius: 16px; background: rgba(5,7,13,0.55); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; line-height: 1.4; color: var(--color-text-muted); white-space: normal; text-align: center; width: max-content; pointer-events: none; }
     #moments-hud .dot { display: inline-block; vertical-align: middle; margin: -2px 6px 0 0; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent-cyan); box-shadow: 0 0 8px var(--color-accent-cyan); animation: momentsPulse 1.8s ease-in-out infinite; }
-    #moments-count { color: var(--color-text-main); font-weight: 600; }
     @keyframes momentsPulse { 50% { opacity: 0.3; } }
-    #moment-toast { position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; margin: 0 auto; max-width: 360px; z-index: 3; padding: 12px 16px; border-radius: 14px; background: rgba(10,8,24,0.8); border: 1px solid rgba(92,225,255,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-align: center; pointer-events: none; opacity: 0; transform: translateY(-8px); transition: opacity 0.35s ease, transform 0.35s ease; }
+    #moment-toast { position: absolute; top: calc(52px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; margin: 0 auto; max-width: 340px; z-index: 3; padding: 8px 14px; border-radius: 14px; background: rgba(10,8,24,0.8); border: 1px solid rgba(92,225,255,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-align: center; pointer-events: none; opacity: 0; transform: translateY(-8px); transition: opacity 0.35s ease, transform 0.35s ease; }
     #moment-toast.show { opacity: 1; transform: none; }
     #moment-toast[hidden] { display: none; }
-    #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 4px; }
-    #moment-toast span { font-family: var(--font-mono); font-size: 12px; line-height: 1.45; color: var(--color-text-main); }
+    #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 2px; }
+    #moment-toast span { font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-text-main); }
     @media (prefers-reduced-motion: reduce) { #moments-hud .dot { animation: none; } }
     #btn-gyro, #btn-pause, #btn-hud, #btn-cine, #speed, #speed-out { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
     #loader.done { visibility: hidden; }
@@ -240,7 +239,7 @@
       </div>
       <button id="btn-show" type="button" hidden></button>
       <p id="gyro-note" role="status" hidden></p>
-      <div id="moments-hud"><span class="dot" aria-hidden="true"></span><span id="moments-count">0/4</span> momentos ocultos · <span id="moments-hint">gira tu celular</span></div>
+      <div id="moments-hud"><span class="dot" aria-hidden="true"></span>Hay momentos ocultos · <span id="moments-hint">gira tu celular</span></div>
       <div id="moment-toast" role="status" hidden><strong></strong><span></span></div>
     </section>
 

@@ -1214,336 +1214,1438 @@ function init(){
     tether.hook.lookAt(_h.copy(end).multiplyScalar(2).sub(prev));
   }
 
-  /* ---------- four hidden moments ----------
-     Each one waits in a different direction around the astronaut, marked only by a faint glint.
-     Holding the view on a glint for half a second (tilting the phone, or dragging) sets it off;
-     it can be replayed after a short rest. */
+  /* ---------- hidden moments ----------
+     Five activation points wait in different directions around the astronaut, each marked only by a faint glint.
+     Holding the view on a glint for half a second (tilting the phone, or dragging) plays one of the ten events of
+     its group, picked at random without repeats until the group is used up. A spent point hides until another
+     point is activated. */
   const MT = controls.target.clone();
   // direction the camera looks when it orbits the astronaut at spherical angles (theta, phi)
   const viewDir = (theta, phi) => V(-Math.sin(phi) * Math.sin(theta), -Math.cos(phi), -Math.sin(phi) * Math.cos(theta));
   const easeIO = (x) => x * x * (3 - 2 * x);
+  const env = (lt, dur, a, b) => smooth(0, a, lt) * (1 - smooth(dur - b, dur, lt));   // fade in over a, out over b
+  const HC = (r, g, b) => new THREE.Color(r, g, b);   // linear colour; values above 1 bloom
   const _mf = new THREE.Vector3(), _mto = new THREE.Vector3(), _mp = new THREE.Vector3(), _mv = new THREE.Vector3(), _ms = new THREE.Vector3(), _mndc = new THREE.Vector3();
-  const momentFx = { ca: 0, lensK: 0, lensX: 0.5, lensY: 0.5, lensR: 0 };
-  const moments = [];
-  const MUI = { count: $('moments-count'), hint: $('moments-hint'), toast: $('moment-toast') };
+  const momentFx = { ca: 0, lensK: 0, lensX: 0.5, lensY: 0.5, lensR: 0, freeze: 0, tintA: 0, tint: new THREE.Color(1, 1, 1), dim: 0 };
+  const MUI = { hint: $('moments-hint'), toast: $('moment-toast') };
   const touchUI = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
   if (MUI.hint) MUI.hint.textContent = touchUI ? 'gira tu celular' : 'arrastra para buscarlos';
-  function addMoment(def){
-    const g = sprite(novaCoreTex, def.glintColor);
-    g.position.copy(def.anchor); scene.add(g);
-    const m = Object.assign({ state: 'idle', time: 0, dwell: 0, found: false, ph: rand() * 6.28, glint: g }, def);
-    moments.push(m);
-    return m;
-  }
 
-  // 1 · temporal echo: a hologram of the astronaut replays what it did 2.5 seconds ago, then rewinds
-  let echoRecord = null;
-  {
-    const src = []; astro.traverse((o) => src.push(o));
-    const kept = src.map((o) => o.userData); src.forEach((o) => { o.userData = {}; });   // userData holds live references; keep them out of the clone
-    const ghost = astro.clone(true);
+  /* small kit shared by the events */
+  const dotTex = spriteTex(64, (g, S) => { const h = S / 2, gr = g.createRadialGradient(h, h, 0, h, h, h); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, S, S); });
+  const FRES_VS = `varying vec3 vN; varying vec3 vV;
+    void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`;
+  // additive hologram: bright rim, faint core
+  const holoMat = (c1, c2) => new THREE.ShaderMaterial({
+    uniforms: { uFade: { value: 0 }, uC1: { value: c1 }, uC2: { value: c2 } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, vertexShader: FRES_VS,
+    fragmentShader: `uniform float uFade; uniform vec3 uC1, uC2; varying vec3 vN; varying vec3 vV;
+      void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV))); vec3 c = mix(uC1, uC2, f) * (0.12 + 1.6 * f * f); gl_FragColor = vec4(c * uFade, 1.0); }`
+  });
+  // dark body with a glowing rim: reads against the bright gas
+  const rimMat = (core, rim) => new THREE.ShaderMaterial({
+    uniforms: { uFade: { value: 0 }, uCore: { value: core }, uRim: { value: rim } },
+    transparent: true, vertexShader: FRES_VS,
+    fragmentShader: `uniform float uFade; uniform vec3 uCore, uRim; varying vec3 vN; varying vec3 vV;
+      void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV))); gl_FragColor = vec4(mix(uCore, uRim, f * f), uFade * (0.7 + 0.3 * f)); }`
+  });
+  const addMat = (color, map) => new THREE.MeshBasicMaterial({ color, map: map || null, fog: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  const lit = (color) => new THREE.MeshBasicMaterial({ color, fog: false });
+  const glow = (color, size) => { const s = sprite(dotTex, color); s.scale.setScalar(size || 1); return s; };
+  function darkHalo(size){ const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: 0x000000, transparent: true, opacity: 0.7, depthWrite: false, fog: false })); s.scale.setScalar(size); return s; }
+  function newGroup(){ const g = new THREE.Group(); g.visible = false; scene.add(g); return g; }
+  function faceCam(o){ o.lookAt(camera.position); }
+  function texOf(w, h, draw){ const c = makeCanvas(w, h); draw(c.getContext('2d'), w, h); return canvasTex(c, true); }
+  function liveTex(w, h){ const c = makeCanvas(w, h); return { c, g: c.getContext('2d'), tx: canvasTex(c, true) }; }
+  function pointsOf(n, size, color){
+    const geo = new THREE.BufferGeometry(), pos = new Float32Array(n * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({ size, map: dotTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, sizeAttenuation: true });
+    const p = new THREE.Points(geo, mat); p.frustumCulled = false;
+    return { p, pos, mat, flush(){ geo.attributes.position.needsUpdate = true; } };
+  }
+  function segsOf(n, color){
+    const geo = new THREE.BufferGeometry(), pos = new Float32Array(n * 6);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+    const l = new THREE.LineSegments(geo, mat); l.frustumCulled = false;
+    return { l, pos, mat, flush(){ geo.attributes.position.needsUpdate = true; } };
+  }
+  // a point on the plane of an activation point: x to the right, y up, d away from the camera
+  const at = (P, x, y, d, out) => (out || new THREE.Vector3()).copy(P.anchor).addScaledVector(P.right, x).addScaledVector(P.up, y).addScaledVector(P.out, d || 0);
+  const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--){ const j = (Math.random() * (i + 1)) | 0; const x = a[i]; a[i] = a[j]; a[j] = x; } return a; };
+  // a copy of a rig without its userData (which holds live references)
+  function cloneClean(root){
+    const src = []; root.traverse((o) => src.push(o));
+    const kept = src.map((o) => o.userData); src.forEach((o) => { o.userData = {}; });
+    const c = root.clone(true);
     src.forEach((o, i) => { o.userData = kept[i]; });
-    const dst = []; ghost.traverse((o) => dst.push(o));
-    const ghostMat = new THREE.ShaderMaterial({
-      uniforms: { uFade: { value: 0 }, uTime: { value: 0 } },
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      vertexShader: `
-        varying vec3 vN; varying vec3 vV;
-        void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `
-        uniform float uFade, uTime; varying vec3 vN; varying vec3 vV;
-        void main(){
-          float f = 1.0 - abs(dot(normalize(vN), normalize(vV))); f *= f;
-          float scan = 0.65 + 0.35 * sin(gl_FragCoord.y * 0.9 - uTime * 24.0);
-          vec3 c = mix(vec3(0.2, 0.75, 1.0), vec3(1.0, 0.45, 0.9), f) * (0.12 + 1.9 * f) * scan;
-          gl_FragColor = vec4(c * uFade, 1.0);
-        }`
-    });
-    ghost.traverse((o) => { if (o.isMesh){ o.material = ghostMat; o.castShadow = false; o.receiveShadow = false; } });
-    ghost.visible = false; scene.add(ghost);
-    const N = src.length, HIST = 720, hist = new Float32Array(HIST * N * 4), histT = new Float64Array(HIST).fill(-1e9);
-    let head = 0;
-    echoRecord = (now) => { const o = head * N * 4; for (let i = 0; i < N; i++) src[i].quaternion.toArray(hist, o + i * 4); histT[head] = now; head = (head + 1) % HIST; };
-    const poseAt = (now, delay) => {
-      const want = now - delay; let idx = (head - 1 + HIST) % HIST;
-      for (let s = 0; s < HIST - 1; s++){ const p = (idx - 1 + HIST) % HIST; if (histT[idx] <= want || histT[p] < -1e8) break; idx = p; }
-      const o = idx * N * 4;
-      for (let i = 0; i < N; i++) dst[i].quaternion.fromArray(hist, o + i * 4);
-    };
-    const anchor = MT.clone().addScaledVector(viewDir(Math.PI, 1.35), 5.5).add(V(1.3, 0.4, 0));
-    addMoment({ name: 'Eco temporal', line: 'Tu yo de hace unos segundos sigue cayendo a tu lado.', anchor, dur: 8.5, glint0: 0.9, glintColor: new THREE.Color(0.5, 1.4, 2.0),
-      start(){ ghost.visible = true; },
-      update(lt, raw, t){
-        const now = performance.now() / 1000;
-        const inK = smooth(0, 0.8, lt), outK = 1 - smooth(this.dur - 1.0, this.dur, lt), rew = Math.max(0, lt - (this.dur - 2.0));
-        poseAt(now, 2.5 + rew * rew * 1.4);   // the delay grows faster than time: the echo plays backwards
-        const glitchy = lt < 0.8 || rew > 0;
-        const flick = reduceMotion || !glitchy ? 1 : (Math.sin(t * 57) > -0.2 ? 1 : 0.35);
-        ghostMat.uniforms.uFade.value = 0.85 * inK * outK * flick;
-        ghostMat.uniforms.uTime.value = t;
-        ghost.position.copy(this.anchor).add(_mv.set(0.25 * Math.sin(lt * 0.7), 0.2 * Math.sin(lt * 0.9), -0.12 * lt));
-        momentFx.ca += 0.02 * (1 - inK) + 0.025 * Math.min(1, rew);
-      },
-      end(){ ghost.visible = false; } });
+    const dst = []; c.traverse((o) => dst.push(o));
+    return { c, dst };
+  }
+  // positions on a plane that spell a text, for stars to gather into
+  function textTargets(text, n, width){
+    const W = 1024, H = 200, c = makeCanvas(W, H), g = c.getContext('2d');
+    let fs = 150; g.font = '400 ' + fs + 'px "Michroma", sans-serif';
+    const mw = g.measureText(text).width;
+    if (mw > W * 0.92){ fs = Math.floor(fs * W * 0.92 / mw); g.font = '400 ' + fs + 'px "Michroma", sans-serif'; }
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, W / 2, H / 2);
+    const d = g.getImageData(0, 0, W, H).data, cand = [];
+    for (let y = 0; y < H; y += 3) for (let x = 0; x < W; x += 3) if (d[(y * W + x) * 4 + 3] > 128) cand.push(x, y);
+    const m = cand.length / 2, k = Math.min(n, m), out = new Float32Array(k * 2), sc = width / W;
+    for (let i = 0; i < k; i++){ const j = (Math.random() * m) | 0; out[i * 2] = (cand[j * 2] - W / 2) * sc; out[i * 2 + 1] = -(cand[j * 2 + 1] - H / 2) * sc; }
+    return out;
+  }
+  function textStars(text, width, color){
+    const pts = textTargets(text, 700, width), N = pts.length / 2, stars = pointsOf(N, 0.14, color), from = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++){ const a = Math.random() * 6.28, r = 3 + Math.random() * 5; from[i * 3] = Math.cos(a) * r; from[i * 3 + 1] = Math.sin(a) * r; from[i * 3 + 2] = (Math.random() - 0.5) * 6; }
+    return { stars, update(k, t, e){
+      for (let i = 0; i < N; i++){ const q = smooth(0, 1, k * 1.3 - (i / N) * 0.3); stars.pos[i * 3] = lerp(from[i * 3], pts[i * 2], q); stars.pos[i * 3 + 1] = lerp(from[i * 3 + 1], pts[i * 2 + 1], q); stars.pos[i * 3 + 2] = from[i * 3 + 2] * (1 - q); }
+      stars.flush(); stars.mat.opacity = e * (0.85 + 0.15 * Math.sin(t * 6));
+    } };
   }
 
-  // 2 · the eye of the abyss: an alien eye opens in the wall of the throat and follows the camera
-  {
-    const anchor = MT.clone().addScaledVector(viewDir(1.75, 1.75), 11);
-    const RE = 2.2;
-    const eye = new THREE.Group(); eye.position.copy(anchor); eye.visible = false; scene.add(eye);
-    const eyeMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uDilate: { value: 1 }, uGlow: { value: 1 } },
-      vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `
-        uniform float uTime, uDilate, uGlow; varying vec3 vP;
-        void main(){
-          vec3 n = normalize(vP);
-          float a = acos(clamp(n.z, -1.0, 1.0));
-          float ph = atan(n.y, n.x);
-          float veins = pow(1.0 - abs(sin(ph * 7.0 + sin(a * 11.0 + ph * 3.0) * 1.4)), 16.0) * smoothstep(0.55, 1.5, a);
-          vec3 col = vec3(0.06, 0.015, 0.1) * (1.2 - 0.5 * smoothstep(0.6, 2.0, a)) + vec3(1.0, 0.1, 0.55) * veins * 0.9 * uGlow;
-          const float R = 0.52;
-          float fib = 0.62 + 0.38 * sin(ph * 64.0 + sin(ph * 11.0) * 2.5) * (0.7 + 0.3 * sin(a * 38.0 - uTime * 0.8));
-          vec3 iris = mix(vec3(1.0, 0.78, 0.18), vec3(0.1, 1.0, 0.75), smoothstep(0.1, R, a)) * fib * (1.6 + 0.4 * uGlow);
-          iris *= 1.0 - 0.8 * smoothstep(R - 0.1, R, a);
-          col = mix(col, iris, 1.0 - smoothstep(R - 0.02, R + 0.02, a));
-          float slit = length(vec2(n.x / (0.035 + 0.15 * uDilate), n.y / 0.4));
-          col *= mix(1.0, smoothstep(0.85, 1.1, slit), step(0.0, n.z));
-          vec2 hs = n.xy - vec2(-0.17, 0.2);
-          col += vec3(1.0) * exp(-dot(hs, hs) * 500.0) * step(0.0, n.z) * 1.4;
-          gl_FragColor = vec4(col, 1.0);
-        }`
-    });
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(RE, 64, 48), eyeMat); eye.add(ball);
-    const lidMat = new THREE.MeshStandardMaterial({ color: C('#3b1838'), roughness: 0.5, metalness: 0, normalMap: TX.rockNormal, normalScale: new THREE.Vector2(1.5, 1.5), emissive: C('#ff3fae'), emissiveIntensity: 0.2, side: THREE.DoubleSide, fog: false, envMapIntensity: 0.8 });
-    const upper = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.05, 64, 24, 0, Math.PI * 2, 0, Math.PI / 2), lidMat);
-    const lower = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.05, 64, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), lidMat);
-    eye.add(upper, lower);
-    const ring = sprite(novaRingTex, new THREE.Color(1.5, 0.35, 1.2)); eye.add(ring);
-    const aim = new THREE.Object3D(), sac = new THREE.Vector2(), sacNow = new THREE.Vector2(); let sacT = 0;
-    addMoment({ name: 'El ojo del abismo', line: 'Algo vive en las paredes del túnel… y te está mirando.', anchor, dur: 9.5, glint0: 1.4, glintColor: new THREE.Color(2.0, 0.5, 1.6),
-      start(){ eye.visible = true; aim.position.copy(eye.position); aim.lookAt(camera.position); eye.quaternion.copy(aim.quaternion); sacNow.set(0, 0); sac.set(0, 0); },
-      update(lt, raw, t){
-        const appear = smooth(0, 0.9, lt) * (1 - smooth(this.dur - 0.9, this.dur, lt));
-        eye.scale.setScalar(Math.max(0.001, appear));
-        let open = smooth(1.0, 2.2, lt) * (1 - smooth(7.4, 8.5, lt));
-        open *= 1 - 0.95 * Math.max(0, 1 - Math.abs(lt - 4.9) / 0.18);   // one slow blink
-        upper.rotation.x = -open * 1.2; lower.rotation.x = open * 1.2;
-        aim.position.copy(eye.position); aim.lookAt(camera.position);
-        eye.quaternion.slerp(aim.quaternion, 1 - Math.exp(-raw * 4));   // it follows you around
-        sacT -= raw;
-        if (sacT <= 0){ sacT = 0.35 + rand() * 0.9; sac.set((rand() - 0.5) * 0.2, (rand() - 0.5) * 0.28); }
-        sacNow.lerp(sac, 1 - Math.exp(-raw * 28));
-        ball.rotation.set(sacNow.x, sacNow.y, 0);
-        eyeMat.uniforms.uTime.value = t;
-        eyeMat.uniforms.uDilate.value = lerp(1, 0.12, smooth(2.0, 2.7, lt)) + 0.1 * Math.sin(t * 3.1);
-        eyeMat.uniforms.uGlow.value = 0.7 + 0.3 * Math.sin(t * 2.2);
-        lidMat.emissiveIntensity = 0.2 + 0.8 * (1 - open) * appear;
-        const rk = smooth(0, 1.8, lt);
-        ring.scale.setScalar(RE * (1.4 + 4.5 * rk)); ring.material.opacity = (1 - rk) * 0.9;
-        momentFx.ca += 0.012 * (1 - smooth(0, 0.9, lt));
-      },
-      end(){ eye.visible = false; } });
+  // pose history of the astronaut, so an echo can replay what it did seconds ago
+  const astroNodes = []; astro.traverse((o) => astroNodes.push(o));
+  const HIST = 720, NA = astroNodes.length, hist = new Float32Array(HIST * NA * 4), histT = new Float64Array(HIST).fill(-1e9);
+  let histHead = 0;
+  function recordPose(now){ const o = histHead * NA * 4; for (let i = 0; i < NA; i++) astroNodes[i].quaternion.toArray(hist, o + i * 4); histT[histHead] = now; histHead = (histHead + 1) % HIST; }
+  function poseAt(dst, now, delay){
+    const want = now - delay; let idx = (histHead - 1 + HIST) % HIST;
+    for (let s = 0; s < HIST - 1; s++){ const p = (idx - 1 + HIST) % HIST; if (histT[idx] <= want || histT[p] < -1e8) break; idx = p; }
+    const o = idx * NA * 4;
+    for (let i = 0; i < NA; i++) dst[i].quaternion.fromArray(hist, o + i * 4);
   }
 
-  // 3 · curious visitors: a saucer scans the astronaut with a beam, tilts its head, and jumps to hyperspace
-  {
-    const out = viewDir(-1.5, 1.7), anchor = MT.clone().addScaledVector(out, 7);
-    const ufo = new THREE.Group(); ufo.visible = false; scene.add(ufo);
-    const spinG = new THREE.Group(); ufo.add(spinG);
-    const hullMat = new THREE.MeshPhysicalMaterial({ color: C('#c3c9d4'), metalness: 1, roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08, normalMap: TX.metalNormal, normalScale: new THREE.Vector2(0.25, 0.25), envMapIntensity: 1.7 });
-    spinG.add(new THREE.Mesh(new THREE.LatheGeometry([V2(0.001,-0.2),V2(0.45,-0.19),V2(0.95,-0.09),V2(1.25,-0.01),V2(1.27,0.02),V2(1.0,0.08),V2(0.55,0.16),V2(0.001,0.19)], 72), hullMat));
-    const lightMats = [], bulb = new THREE.SphereGeometry(0.055, 10, 8);
-    for (let i = 0; i < 14; i++){
-      const a = i / 14 * Math.PI * 2, mt = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), fog: false });
-      const b = new THREE.Mesh(bulb, mt); b.position.set(Math.cos(a) * 1.2, 0, Math.sin(a) * 1.2); spinG.add(b); lightMats.push(mt);
-    }
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.46, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: C('#9dffc8'), roughness: 0.04, clearcoat: 1, transparent: true, opacity: 0.45, emissive: C('#14ff8c'), emissiveIntensity: 0.35, envMapIntensity: 1.5, depthWrite: false }));
-    dome.position.y = 0.15; ufo.add(dome);
-    // the pilot: a small round head with two big glowing eyes
-    const pilot = new THREE.Group(); pilot.position.y = 0.22; ufo.add(pilot);
-    pilot.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 24, 16), new THREE.MeshStandardMaterial({ color: C('#3fae6a'), roughness: 0.5 })));
-    const pupilMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 2.6, 2.2), fog: false });
-    for (const sd of [-1, 1]){ const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), pupilMat); e.position.set(sd * 0.055, 0.03, 0.115); e.scale.set(1, 1.4, 0.6); pilot.add(e); }
-    const belly = new THREE.Mesh(new THREE.CircleGeometry(0.5, 40).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 3.0, 1.6), fog: false, side: THREE.DoubleSide }));
-    belly.position.y = -0.2; ufo.add(belly);
-    const beamMat = new THREE.ShaderMaterial({
-      uniforms: { uOn: { value: 0 }, uTime: { value: 0 } },
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      vertexShader: `
-        varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-        void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `
-        uniform float uOn, uTime; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-        void main(){
-          float core = abs(dot(normalize(vN), normalize(vV)));
-          float band = pow(fract(vUv.y * 7.0 + uTime * 1.6), 10.0);
-          float fade = smoothstep(0.0, 0.15, vUv.y) * (1.0 - smoothstep(0.85, 1.0, vUv.y));
-          vec3 c = vec3(0.35, 1.0, 0.65) * (0.16 + 1.3 * band) * (0.3 + 0.7 * core) * fade;
-          gl_FragColor = vec4(c * uOn, 1.0);
-        }`
-    });
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.85, 1, 40, 1, true), beamMat); beam.visible = false; scene.add(beam);
-    const flash = sprite(novaCoreTex, new THREE.Color(0.8, 2.2, 1.4)); flash.visible = false; scene.add(flash);
-    const from = new THREE.Vector3(), away = V(0.35, 0.75, -1).normalize(), Yup = V(0, 1, 0), aim = new THREE.Object3D(), level = new THREE.Quaternion();
-    let flashPlaced = false;
-    addMoment({ name: 'Visitantes curiosos', line: 'Un platillo escaneó tu traje y saltó al hiperespacio.', anchor, dur: 8.6, glint0: 1.0, glintColor: new THREE.Color(0.6, 2.2, 1.2),
-      start(){ from.copy(anchor).addScaledVector(out, 22).add(_mv.set(0, 7, -6)); ufo.position.copy(from); ufo.visible = true; flashPlaced = false; },
-      update(lt, raw, t){
-        const A = astro.position;
-        const arrive = easeIO(smooth(0, 1.8, lt)), leave = Math.max(0, lt - 7.2);
-        ufo.position.lerpVectors(from, anchor, arrive);
-        ufo.position.y += 0.12 * Math.sin(t * 2.3);
-        if (leave > 0) ufo.position.addScaledVector(away, leave * leave * 160);
-        spinG.rotation.y += raw * (2.2 + 7 * (1 - arrive) + 14 * leave);
-        // tip the saucer partway toward the astronaut, then a curious head tilt before leaving
-        aim.position.copy(ufo.position); aim.lookAt(A); aim.rotateX(-Math.PI / 2);
-        ufo.quaternion.copy(level).slerp(aim.quaternion, 0.45);
-        ufo.rotateZ(0.28 * Math.sin(lt * 6.0) * smooth(6.3, 6.6, lt) * (1 - smooth(7.0, 7.2, lt)));
-        ufo.updateMatrixWorld(true);
-        pilot.lookAt(camera.position);
-        lightMats.forEach((mt, i) => { mt.color.setHSL((t * 0.5 + i / lightMats.length) % 1, 1, 0.55).multiplyScalar(2.0 + 1.6 * Math.max(0, Math.sin(t * 9 - i))); });
-        const on = smooth(1.9, 2.4, lt) * (1 - smooth(6.0, 6.4, lt));
-        beam.visible = on > 0.001;
-        if (beam.visible){
-          _mp.copy(A).add(_mv.set(0.25 * Math.sin(t * 1.7), 0.3 * Math.sin(t * 1.1), 0));   // the beam sweeps over the suit
-          ufo.localToWorld(_ms.set(0, -0.2, 0));
-          _mto.copy(_ms).sub(_mp); const len = _mto.length(); _mto.normalize();
-          beam.position.copy(_mp).addScaledVector(_mto, len / 2);
-          beam.quaternion.setFromUnitVectors(Yup, _mto);
-          beam.scale.set(1, len, 1);
-        }
-        beamMat.uniforms.uOn.value = on; beamMat.uniforms.uTime.value = t;
-        lampLens.emissiveIntensity = 1.5 + on * (Math.sin(t * 38) > 0 ? 2.2 : -1.3);   // the helmet lamps stutter under the scan
-        const fl = smooth(7.1, 7.3, lt) * (1 - smooth(7.4, 8.4, lt));
-        flash.visible = fl > 0.001;
-        if (flash.visible){
-          if (!flashPlaced){ flash.position.copy(ufo.position); flashPlaced = true; }
-          flash.material.opacity = fl; flash.scale.setScalar(1.5 + 10 * smooth(7.1, 8.4, lt));
-        }
-        if (lt > 8.0) ufo.visible = false;
-        momentFx.ca += 0.02 * fl;
-      },
-      end(){ ufo.visible = false; beam.visible = false; flash.visible = false; lampLens.emissiveIntensity = 1.5; } });
-  }
+  /* ===== group 1 · time ===== */
+  const TIME = [
+    { name: 'Eco temporal', line: 'Tu yo de hace unos segundos aparece a tu lado… y se rebobina.', dur: 8.5, make(P){
+      const { c: ghost, dst } = cloneClean(astro);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uFade: { value: 0 }, uTime: { value: 0 } }, transparent: true, depthWrite: false, vertexShader: FRES_VS,
+        fragmentShader: `uniform float uFade, uTime; varying vec3 vN; varying vec3 vV;
+          void main(){
+            float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+            float scan = 0.7 + 0.3 * sin(gl_FragCoord.y * 0.9 - uTime * 24.0);
+            vec3 rim = vec3(0.55, 1.6, 2.6) * (0.4 + 2.8 * f * f) * scan;
+            vec3 c = mix(vec3(0.02, 0.05, 0.13), rim, 0.2 + 0.8 * smoothstep(0.0, 0.9, f));
+            gl_FragColor = vec4(c, uFade * (0.6 + 0.4 * f));
+          }` });
+      ghost.traverse((o) => { if (o.isMesh){ o.material = mat; o.castShadow = false; o.receiveShadow = false; } });
+      ghost.visible = false; ghost.scale.setScalar(1.6); scene.add(ghost);
+      const halo = darkHalo(6); halo.visible = false; scene.add(halo);   // a dark patch behind the hologram so it stands out from the bright gas
+      const rings = [0, 1].map(() => { const r = sprite(novaRingTex, HC(0.6, 1.6, 2.4)); r.visible = false; scene.add(r); return r; });
+      const base = at(P, 0, -0.4, -3.0), D = 8.5;
+      return {
+        start(){ ghost.visible = halo.visible = true; rings.forEach((r) => { r.visible = true; }); },
+        update(lt, raw, t){
+          const inK = smooth(0, 0.8, lt), outK = 1 - smooth(D - 1.0, D, lt), rew = Math.max(0, lt - (D - 2.0));
+          poseAt(dst, performance.now() / 1000, 2.5 + rew * rew * 1.4);   // the delay grows faster than time: it plays backwards
+          const glitchy = lt < 0.8 || rew > 0, flick = reduceMotion || !glitchy ? 1 : (Math.sin(t * 57) > -0.2 ? 1 : 0.35);
+          mat.uniforms.uFade.value = inK * outK * flick; mat.uniforms.uTime.value = t;
+          ghost.position.copy(base).addScaledVector(P.right, 0.25 * Math.sin(lt * 0.7)).addScaledVector(P.up, 0.2 * Math.sin(lt * 0.9));
+          halo.position.copy(ghost.position).addScaledVector(P.out, 1.4); halo.material.opacity = 0.8 * inK * outK;
+          const r0 = smooth(0, 1.4, lt); rings[0].position.copy(ghost.position); rings[0].scale.setScalar(1 + 8 * r0); rings[0].material.opacity = 1 - r0;
+          const r1 = smooth(D - 1.6, D, lt); rings[1].position.copy(ghost.position); rings[1].scale.setScalar(9 - 8 * r1); rings[1].material.opacity = r1 * (1 - r1) * 3;
+          momentFx.ca += 0.025 * (1 - inK) + 0.03 * Math.min(1, rew);
+        },
+        end(){ ghost.visible = halo.visible = false; rings.forEach((r) => { r.visible = false; }); }
+      };
+    } },
+    { name: 'Reloj derretido', line: 'Las agujas giran hacia atrás y las horas se escurren.', dur: 8, make(P){
+      const G = newGroup(), gold = HC(2.2, 1.5, 0.55), white = HC(2.4, 2.3, 2.1);
+      const face = new THREE.Mesh(new THREE.CircleGeometry(1.5, 64), new THREE.MeshBasicMaterial({ color: HC(0.04, 0.02, 0.08), transparent: true, opacity: 0.8, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+      G.add(face, new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.05, 10, 96), lit(gold)));
+      const ticks = [];
+      for (let i = 0; i < 12; i++){ const m = new THREE.Mesh(new THREE.BoxGeometry(0.07, i % 3 ? 0.18 : 0.32, 0.04), lit(gold)); m.userData.a = i / 12 * Math.PI * 2; m.rotation.z = -m.userData.a; G.add(m); ticks.push(m); }
+      const hand = (len, w) => { const g = new THREE.BoxGeometry(w, len, 0.03); g.translate(0, len * 0.45, 0.03); const m = new THREE.Mesh(g, lit(white)); G.add(m); return m; };
+      const hourH = hand(0.75, 0.09), minH = hand(1.15, 0.05);
+      const drops = pointsOf(24, 0.22, gold); G.add(drops.p);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 8, 0.8, 1.0), melt = smooth(2.0, 7.0, lt);
+          G.scale.setScalar(Math.max(0.001, e));
+          minH.rotation.z = lt * lt * 2.2; hourH.rotation.z = lt * lt * 0.18;   // counter-clockwise, faster and faster
+          face.scale.set(1, 1 + 0.3 * melt, 1); face.position.y = -0.35 * melt;
+          ticks.forEach((m) => { const c = Math.cos(m.userData.a), low = Math.max(0, -c); m.position.set(Math.sin(m.userData.a) * 1.3, c * 1.3 - melt * low * 1.1, 0.02); m.scale.y = 1 + melt * low * 3; });
+          for (let i = 0; i < 24; i++){ const born = 2.2 + (i % 8) * 0.55 + Math.floor(i / 8) * 0.18, k = Math.max(0, lt - born); drops.pos.set([(i / 23 - 0.5) * 1.8, k > 0 ? -1.4 - 0.4 * melt - k * k * 1.3 : 1e4, 0.05], i * 3); }
+          drops.flush(); drops.mat.opacity = e;
+          momentFx.ca += 0.01 * (1 - smooth(0, 0.8, lt));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Déjà vu', line: 'La misma roca pasa tres veces… exactamente igual.', dur: 7.6, make(P){
+      const rock = new THREE.Mesh(rockGeos[1], rockMats[0]); rock.scale.setScalar(0.55); rock.visible = false; scene.add(rock);
+      const trail = pointsOf(40, 0.25, HC(0.5, 1.3, 2.0)); trail.p.visible = false; scene.add(trail.p);
+      const flash = sprite(novaRingTex, HC(0.6, 1.4, 2.2)); flash.visible = false; scene.add(flash);
+      const a = new THREE.Vector3(), b = new THREE.Vector3(), L = 2.4;
+      const pathAt = (k, out) => out.lerpVectors(a, b, k).addScaledVector(P.up, Math.sin(k * Math.PI) * 0.8);
+      return {
+        start(){ at(P, -5, 1.2, 0, a); at(P, 5, -1.0, -1, b); rock.visible = trail.p.visible = flash.visible = true; },
+        update(lt, raw, t){
+          const loop = Math.min(2, Math.floor(lt / L)), k = Math.min(1, (lt - loop * L) / L);
+          pathAt(k, rock.position); rock.rotation.set(k * 4.1, k * 2.3, k * 1.7);   // identical spin on every pass
+          flash.position.copy(a); const fk = Math.min(1, k * 2.5); flash.scale.setScalar(1 + 5 * fk); flash.material.opacity = 1 - fk;
+          for (let i = 0; i < 40; i++){ pathAt(Math.max(0, k - i * 0.012), _mp); trail.pos.set([_mp.x, _mp.y, _mp.z], i * 3); }
+          trail.flush(); trail.mat.opacity = 0.6 * (1 - smooth(7.0, 7.6, lt));
+          rock.visible = lt < 7.2;
+          momentFx.ca += 0.02 * (1 - fk);
+        },
+        end(){ rock.visible = trail.p.visible = flash.visible = false; }
+      };
+    } },
+    { name: 'Tiempo congelado', line: 'El universo se detiene… pero tú sigues moviéndote.', dur: 6, make(P){
+      const frost = pointsOf(90, 0.12, HC(1.4, 1.8, 2.4)); frost.p.visible = false; scene.add(frost.p);
+      const ring = sprite(novaRingTex, HC(1.2, 1.6, 2.4)); ring.visible = false; scene.add(ring);
+      const seeds = []; for (let i = 0; i < 90; i++) seeds.push([(Math.random() - 0.5) * 7, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 3, Math.random() * 6.28]);
+      return {
+        start(){ frost.p.visible = ring.visible = true; ring.position.copy(P.anchor); },
+        update(lt, raw, t){
+          const f = env(lt, 6, 0.35, 1.2);
+          momentFx.freeze = Math.max(momentFx.freeze, f);
+          seeds.forEach((s, i) => { at(P, s[0], s[1] + 0.1 * Math.sin(lt * 0.5 + s[3]), s[2] - 2, _mp); frost.pos.set([_mp.x, _mp.y, _mp.z], i * 3); });
+          frost.flush(); frost.mat.opacity = f * (0.6 + 0.4 * Math.sin(t * 7));
+          const rk = smooth(0, 1.2, lt); ring.scale.setScalar(1 + 14 * rk); ring.material.opacity = 1 - rk;
+        },
+        end(){ frost.p.visible = ring.visible = false; }
+      };
+    } },
+    { name: 'Reloj de arena', line: 'La arena sube: aquí el tiempo cae hacia arriba.', dur: 8.5, make(P){
+      const G = newGroup(), radius = (y) => 0.1 + 0.72 * Math.pow(Math.abs(y) / 1.2, 1.3);
+      const prof = []; for (let i = 0; i <= 24; i++){ const y = -1.2 + i * 0.1; prof.push(V2(radius(y), y)); }
+      G.add(new THREE.Mesh(new THREE.LatheGeometry(prof, 48), new THREE.MeshPhysicalMaterial({ color: C('#d8f2ff'), roughness: 0.05, metalness: 0, clearcoat: 1, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.6 })));
+      for (const sy of [-1, 1]){ const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.1, 40), alu); cap.position.y = sy * 1.27; G.add(cap); }
+      for (let i = 0; i < 3; i++){ const a = i / 3 * Math.PI * 2, rod = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.5, 8), alu); rod.position.set(Math.cos(a) * 0.9, 0, Math.sin(a) * 0.9); G.add(rod); }
+      const N = 260, sand = pointsOf(N, 0.1, HC(2.6, 1.6, 0.5)); G.add(sand.p);
+      const seeds = []; for (let i = 0; i < N; i++) seeds.push({ a: Math.random() * 6.28, r: Math.random(), h: Math.random(), d: 0.4 + (i / N) * 6.2 });
+      const rest = (s, sign) => { const y = sign * (1.15 - s.h * 0.55), rr = radius(y) * 0.85 * Math.sqrt(s.r); return [Math.cos(s.a) * rr, y, Math.sin(s.a) * rr]; };
+      return {
+        start(){ G.position.copy(P.anchor); G.quaternion.setFromUnitVectors(V(0, 1, 0), P.up); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 8.5, 0.7, 1.0); G.scale.setScalar(Math.max(0.001, e) * 1.6); G.rotateY(raw * 0.3);
+          seeds.forEach((s, i) => {
+            const k = smooth(0, 1, (lt - s.d) / 0.8), lo = rest(s, -1), hi = rest(s, 1);   // each grain climbs through the neck
+            const y = lerp(lo[1], hi[1], k), neck = 1 - Math.min(1, Math.abs(y) / 0.5) * (k > 0 && k < 1 ? 1 : 0);
+            const squeeze = k > 0 && k < 1 ? 1 - neck * 0.95 : 1;
+            sand.pos.set([lerp(lo[0], hi[0], k) * squeeze, y, lerp(lo[2], hi[2], k) * squeeze], i * 3);
+          });
+          sand.flush();
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Nave del futuro', line: 'Tu propia nave, oxidada, dentro de mil años.', dur: 9, make(P){
+      const { c: wreck } = cloneClean(ship);
+      const rust = new THREE.MeshStandardMaterial({ color: C('#7a4a2c'), map: TX.rockColor, normalMap: TX.rockNormal, normalScale: new THREE.Vector2(1.5, 1.5), roughness: 0.95, metalness: 0.35, envMapIntensity: 0.6 });
+      wreck.traverse((o) => { if (o.isMesh) o.material = rust; if (o.isSprite) o.visible = false; });
+      wreck.visible = false; scene.add(wreck);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ at(P, -5.5, 0.6, 1, a); at(P, 5.5, -0.4, 0, b); wreck.visible = true; wreck.rotation.set(0.4, 1.2, 0.2); },
+        update(lt, raw, t){ wreck.position.lerpVectors(a, b, lt / 9); wreck.rotation.x += raw * 0.12; wreck.rotation.z += raw * 0.07; wreck.scale.setScalar(0.55 * Math.max(0.001, env(lt, 9, 1, 1.2))); },
+        end(){ wreck.visible = false; }
+      };
+    } },
+    { name: 'Ventana al pasado', line: 'Por un instante se ve la Tierra de hace 150 millones de años.', dur: 9, make(P){
+      const G = newGroup(), L = liveTex(512, 512);
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(1.7, 64), new THREE.MeshBasicMaterial({ map: L.tx, fog: false, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+      G.add(disc, new THREE.Mesh(new THREE.TorusGeometry(1.72, 0.05, 10, 96), lit(HC(2.6, 1.2, 0.4))));
+      const halo = sprite(novaRingTex, HC(2.0, 0.9, 0.4)); halo.scale.setScalar(4.6); G.add(halo);
+      function draw(lt){
+        const g = L.g, S = 512;
+        const sky = g.createLinearGradient(0, 0, 0, S); sky.addColorStop(0, '#2a1446'); sky.addColorStop(0.5, '#d2562a'); sky.addColorStop(0.75, '#f3a34b');
+        g.fillStyle = sky; g.fillRect(0, 0, S, S);
+        g.fillStyle = 'rgba(255,220,150,0.9)'; g.beginPath(); g.arc(360, 250, 34, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#3a1d1d'; g.beginPath(); g.moveTo(40, 380); g.lineTo(170, 220); g.lineTo(205, 222); g.lineTo(330, 380); g.fill();   // volcano
+        for (let i = 0; i < 6; i++){ g.fillStyle = 'rgba(70,50,60,' + (0.5 - i * 0.07) + ')'; g.beginPath(); g.arc(188 + i * 14 + Math.sin(lt + i) * 6, 205 - i * 26 - (lt * 10) % 26, 18 + i * 7, 0, Math.PI * 2); g.fill(); }
+        g.fillStyle = '#ff6a1a'; g.fillRect(183, 218, 12, 8);
+        g.fillStyle = '#1d140f'; g.fillRect(0, 380, S, S - 380);
+        g.strokeStyle = '#120c08'; g.lineWidth = 4;
+        for (let i = 0; i < 9; i++){ const x = 20 + i * 58; g.beginPath(); g.moveTo(x, 390); g.quadraticCurveTo(x - 20, 340, x - 30, 330); g.moveTo(x, 390); g.quadraticCurveTo(x + 18, 345, x + 30, 332); g.stroke(); }
+        // a long-necked dinosaur walking across
+        const x = -120 + ((lt * 55) % 760), bob = Math.sin(lt * 4) * 3;
+        g.fillStyle = '#0d0907';
+        g.beginPath(); g.ellipse(x, 330 + bob, 70, 34, 0, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.moveTo(x + 40, 315 + bob); g.quadraticCurveTo(x + 90, 250, x + 105, 190 + bob); g.lineTo(x + 122, 192 + bob); g.quadraticCurveTo(x + 110, 260, x + 62, 330 + bob); g.fill();
+        g.beginPath(); g.ellipse(x + 120, 188 + bob, 16, 9, -0.2, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.moveTo(x - 60, 322 + bob); g.quadraticCurveTo(x - 130, 330, x - 170, 360); g.lineTo(x - 165, 366); g.quadraticCurveTo(x - 120, 345, x - 55, 345 + bob); g.fill();
+        for (let k = 0; k < 4; k++){ const sw = Math.sin(lt * 4 + k * 1.6) * 8; g.fillRect(x - 40 + k * 27 + sw * 0.3, 350 + bob, 15, 42 - bob); }
+        g.globalCompositeOperation = 'destination-in';   // soft round window
+        const m = g.createRadialGradient(256, 256, 200, 256, 256, 256); m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = m; g.fillRect(0, 0, S, S);
+        g.globalCompositeOperation = 'source-over';
+        L.tx.needsUpdate = true;
+      }
+      let acc = 0;
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; draw(0); },
+        update(lt, raw, t){ const e = env(lt, 9, 0.9, 1.0); G.scale.setScalar(Math.max(0.001, e)); disc.material.opacity = e; halo.material.opacity = 0.6 * e; acc += raw; if (acc > 1 / 30){ acc = 0; draw(lt); } },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Bucle de luz', line: 'Un rayo dio la vuelta al túnel y te alcanzó por la espalda.', dur: 6.5, make(P){
+      const head = sprite(novaCoreTex, HC(1.6, 2.2, 2.6)); head.visible = false; scene.add(head);
+      const N = 70, trail = pointsOf(N, 0.3, HC(0.6, 1.4, 2.4)); trail.p.visible = false; scene.add(trail.p);
+      const hit = sprite(novaRingTex, HC(1.6, 2.0, 2.6)); hit.visible = false; scene.add(hit);
+      const past = []; for (let i = 0; i < N; i++) past.push(new THREE.Vector3());
+      let filled = 0;
+      const path = (k, out) => {   // from the glint onto a loop around the throat, then home into the astronaut
+        const a0 = Math.atan2(P.anchor.y, P.anchor.x), ang = a0 + k * Math.PI * 2.4, z = lerp(P.anchor.z, astro.position.z + 1.5, k);
+        out.set(Math.cos(ang) * 3.6, Math.sin(ang) * 3.6, z);
+        out.lerpVectors(P.anchor, out, smooth(0, 0.15, k));
+        return out.lerp(astro.position, smooth(0.8, 1.0, k));
+      };
+      return {
+        start(){ head.visible = trail.p.visible = true; filled = 0; },
+        update(lt, raw, t){
+          const k = Math.min(1, lt / 4.6);
+          path(k, _mp); head.position.copy(_mp); head.scale.setScalar(1.2 + 0.3 * Math.sin(t * 30)); head.visible = k < 1;
+          const last = past.pop(); last.copy(_mp); past.unshift(last); filled = Math.min(N, filled + 1);
+          for (let i = 0; i < N; i++){ const p = past[Math.min(i, filled - 1)]; trail.pos.set([p.x, p.y, p.z], i * 3); }
+          trail.flush(); trail.mat.opacity = 1 - smooth(5.0, 6.5, lt);
+          const h = smooth(4.5, 4.7, lt) * (1 - smooth(4.8, 6.2, lt));
+          hit.visible = h > 0.001; hit.position.copy(astro.position); hit.scale.setScalar(1 + 6 * smooth(4.5, 6.2, lt)); hit.material.opacity = h;
+          lampLens.emissiveIntensity = 1.5 + 4 * h;
+          momentFx.ca += 0.03 * h;
+        },
+        end(){ head.visible = trail.p.visible = hit.visible = false; lampLens.emissiveIntensity = 1.5; }
+      };
+    } },
+    { name: 'Gato de Schrödinger', line: '', dur: 8.5, make(P, def){
+      const G = newGroup();
+      const card = new THREE.MeshStandardMaterial({ color: C('#b8894f'), roughness: 0.9, map: TX.fabricColor, envMapIntensity: 0.5 });
+      const box = new THREE.Mesh(roundedBox(1, 0.9, 1, 0.04, 8, 2), card); G.add(box);
+      const hinge = new THREE.Group(); hinge.position.set(0, 0.45, -0.5); G.add(hinge);
+      const lid = new THREE.Mesh(roundedBox(1.04, 0.07, 1.04, 0.02, 6, 2), card); lid.position.set(0, 0.03, 0.52); hinge.add(lid);
+      const catTex = texOf(256, 256, (g) => {
+        g.fillStyle = '#9ff6ff'; g.shadowColor = '#5ce1ff'; g.shadowBlur = 18;
+        g.beginPath(); g.ellipse(128, 170, 48, 56, 0, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(128, 96, 38, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.moveTo(96, 78); g.lineTo(100, 36); g.lineTo(122, 64); g.fill();
+        g.beginPath(); g.moveTo(160, 78); g.lineTo(156, 36); g.lineTo(134, 64); g.fill();
+        g.lineWidth = 12; g.strokeStyle = '#9ff6ff'; g.beginPath(); g.moveTo(170, 205); g.quadraticCurveTo(230, 200, 214, 130); g.stroke();
+        g.shadowBlur = 0; g.fillStyle = '#0a1a24'; g.beginPath(); g.ellipse(114, 94, 6, 9, 0, 0, Math.PI * 2); g.ellipse(142, 94, 6, 9, 0, 0, Math.PI * 2); g.fill();
+      });
+      const qTex = texOf(256, 256, (g) => { g.fillStyle = '#ffd38a'; g.shadowColor = '#ffb04a'; g.shadowBlur = 20; g.font = '700 190px "Michroma", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', 128, 136); });
+      const reveal = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), addMat(HC(1.6, 1.6, 1.6), catTex)); G.add(reveal);
+      return {
+        start(){
+          const alive = Math.random() < 0.5;
+          reveal.material.map = alive ? catTex : qTex; reveal.material.needsUpdate = true;
+          def.line = alive ? 'Abriste la caja: el gato está vivo… en este universo.' : 'La caja estaba vacía. En otro universo, el gato te saluda.';
+          G.position.copy(P.anchor); faceCam(G); G.rotateX(0.35); G.visible = true;
+        },
+        update(lt, raw, t){
+          const e = env(lt, 8.5, 0.8, 1.0); G.scale.setScalar(Math.max(0.001, e));
+          hinge.rotation.x = -2.0 * easeIO(smooth(2.2, 3.2, lt));
+          const r = smooth(3.0, 4.2, lt); reveal.visible = r > 0.001; reveal.position.set(0, 0.2 + 1.0 * r, 0); reveal.material.opacity = r * e;
+          reveal.quaternion.copy(G.quaternion).invert().multiply(camera.quaternion);   // keep facing the camera inside the group
+          box.rotation.y = 0.15 * Math.sin(t * 0.8);
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Clon del casco', line: 'Un casco gigante flota a tu lado… y su visor muestra una playa de la Tierra.', dur: 8.5, make(P){
+      const G = newGroup(), R = 1.3;
+      const beach = texOf(512, 256, (g) => {
+        const sky = g.createLinearGradient(0, 0, 0, 160); sky.addColorStop(0, '#2d5fa8'); sky.addColorStop(0.6, '#f4a259'); sky.addColorStop(1, '#ffd29a'); g.fillStyle = sky; g.fillRect(0, 0, 512, 160);
+        g.fillStyle = '#fff1c9'; g.beginPath(); g.arc(300, 150, 30, 0, Math.PI * 2); g.fill();
+        const sea = g.createLinearGradient(0, 150, 0, 210); sea.addColorStop(0, '#2b7fa3'); sea.addColorStop(1, '#13506e'); g.fillStyle = sea; g.fillRect(0, 150, 512, 60);
+        g.fillStyle = '#f1d39b'; g.fillRect(0, 205, 512, 51);
+        g.strokeStyle = '#3b2a1a'; g.lineWidth = 7; g.beginPath(); g.moveTo(90, 230); g.quadraticCurveTo(100, 150, 80, 90); g.stroke();
+        g.fillStyle = '#1f4a2a'; for (let i = 0; i < 6; i++){ g.beginPath(); g.ellipse(80 + Math.cos(i) * 30, 90 + Math.sin(i * 2) * 8, 40, 9, i * 1.05, 0, Math.PI * 2); g.fill(); }
+      });
+      G.add(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 48), shell));
+      const visor = new THREE.Mesh(new THREE.SphereGeometry(R * 1.037, 72, 40, VP0, VPL, VT0, VTL), new THREE.MeshPhysicalMaterial({ color: C('#ffffff'), metalness: 0.6, roughness: 0.05, clearcoat: 1, emissive: C('#ffffff'), emissiveMap: beach, emissiveIntensity: 0, envMapIntensity: 1.2 }));
+      G.add(visor, new THREE.Mesh(new THREE.SphereGeometry(R * 1.076, 72, 24, 0, Math.PI * 2, 0, VT0 + 0.012), shell));
+      const neck = new THREE.Mesh(new THREE.TorusGeometry(R * 0.75, 0.12, 16, 64).rotateX(Math.PI / 2), alu); neck.position.y = -R * 0.85; G.add(neck);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){ G.scale.setScalar(Math.max(0.001, env(lt, 8.5, 1.0, 1.0))); visor.material.emissiveIntensity = 1.6 * smooth(1.2, 2.6, lt) * (1 - smooth(6.8, 8.0, lt)); },
+        end(){ G.visible = false; }
+      };
+    } }
+  ];
 
-  // 4 · micro black hole: it bends the light behind it, swallows a fragment and evaporates in a flash
-  {
-    const anchor = MT.clone().addScaledVector(viewDir(-0.9, 0.7), 8);
-    const RH = 0.5;
-    const bh = new THREE.Group(); bh.position.copy(anchor); bh.visible = false; scene.add(bh);
-    bh.add(new THREE.Mesh(new THREE.SphereGeometry(RH, 40, 24), new THREE.MeshBasicMaterial({ color: 0x000000, fog: false })));
-    const diskMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uFade: { value: 0 } },
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `
-        uniform float uTime, uFade; varying vec2 vP;
-        void main(){
-          float r = length(vP), a = atan(vP.y, vP.x);
-          float k = clamp((r - 0.62) / 1.5, 0.0, 1.0);
-          float swirl = 0.5 + 0.5 * sin(a * 3.0 - uTime * 3.0 / (r * r) + r * 9.0);
-          float grain = 0.6 + 0.4 * sin(a * 13.0 - uTime * 5.0 / r + r * 27.0);
-          float heat = pow(1.0 - k, 2.2);
-          vec3 c = mix(vec3(1.0, 0.22, 0.05), vec3(1.0, 0.92, 0.75), heat);
-          float beaming = 0.35 + 0.65 * (0.5 + 0.5 * sin(a));
-          float I = heat * (0.35 + 0.65 * swirl * grain) * beaming * smoothstep(0.0, 0.05, k) * (1.0 - smoothstep(0.8, 1.0, k));
-          gl_FragColor = vec4(c * I * 3.2 * uFade, 1.0);
-        }`
-    });
-    const disk = new THREE.Mesh(new THREE.RingGeometry(0.62, 2.12, 160, 1), diskMat);
-    disk.rotation.set(1.15, 0.3, 0); bh.add(disk);
-    const halo = sprite(novaRingTex, new THREE.Color(1.3, 0.8, 0.45)); bh.add(halo);
-    const pop = sprite(novaCoreTex, new THREE.Color(1.6, 1.5, 2.4)); pop.position.copy(anchor); pop.visible = false; scene.add(pop);
-    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), preyScale = new THREE.Vector3();
-    let prey = null, preyAng = 0;
-    const release = () => { if (!prey) return; prey.mesh.scale.copy(preyScale); prey.captured = false; place(prey, false); prey = null; };
-    addMoment({ name: 'Micro agujero negro', line: 'La luz se dobla a su alrededor… y se traga un fragmento.', anchor, dur: 10, glint0: 1.0, glintColor: new THREE.Color(2.2, 1.3, 0.6),
-      start(){
-        bh.visible = true;
-        const pool = debris.filter((d) => !d.big && !d.captured && d.mesh.scale.x < 0.4);
-        prey = pool.length ? pool[(rand() * pool.length) | 0] : null;
-        if (prey){ prey.captured = true; preyScale.copy(prey.mesh.scale); preyAng = rand() * 6.28; }
-      },
-      update(lt, raw, t){
-        const grow = easeIO(smooth(0, 1.2, lt)), shrink = 1 - smooth(7.0, 8.6, lt), s = Math.max(0.001, grow * shrink);
-        bh.scale.setScalar(s);
-        diskMat.uniforms.uTime.value = t;
-        diskMat.uniforms.uFade.value = grow * (1 + 1.2 * smooth(6.5, 8.4, lt));   // it flares up as it evaporates
-        halo.scale.setScalar(2.6); halo.material.opacity = 0.6; halo.material.rotation += raw * 0.4;
-        if (prey){
-          if (lt < 6.4){
-            const k = smooth(1.4, 6.4, lt), r = lerp(4.5, 0.5, easeIO(k));
-            e1.set(1, 0, 0).applyQuaternion(disk.quaternion); e2.set(0, 1, 0).applyQuaternion(disk.quaternion);
-            preyAng += raw * (0.5 + 2.6 / Math.max(r, 0.45));   // faster and faster as it falls in
-            const pm = prey.mesh;
-            pm.position.copy(bh.position).addScaledVector(e1, Math.cos(preyAng) * r).addScaledVector(e2, Math.sin(preyAng) * r);
-            pm.scale.copy(preyScale).multiplyScalar(Math.max(0.02, 1 - 0.95 * smooth(0.55, 1, k)));
-            pm.rotation.z += raw * 8 * k;
-          } else release();
-        }
-        const p = smooth(8.4, 8.6, lt) * (1 - smooth(8.7, 9.9, lt));   // the last flash as it evaporates
-        pop.visible = p > 0.001;
-        if (pop.visible){ pop.material.opacity = p; pop.scale.setScalar(1 + 7 * smooth(8.4, 9.9, lt)); }
-        momentFx.ca += 0.02 * p;
-        // gravitational lensing is drawn in the final pass, centred on the hole
-        if (s > 0.01){
-          _mndc.copy(bh.position).project(camera);
-          if (_mndc.z < 1 && Math.abs(_mndc.x) < 1.5 && Math.abs(_mndc.y) < 1.5){
-            const dist = camera.position.distanceTo(bh.position);
-            const r = 0.5 * RH * s / (dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-            momentFx.lensK = Math.pow(r * 2.0, 2); momentFx.lensR = r;
-            momentFx.lensX = _mndc.x * 0.5 + 0.5; momentFx.lensY = _mndc.y * 0.5 + 0.5;
+  /* ===== group 2 · creatures ===== */
+  const CREATURES = [
+    { name: 'El ojo del abismo', line: 'Algo vive en las paredes del túnel… y te está mirando.', dur: 9.5, make(P){
+      const RE = 2.2, D = 9.5, eye = newGroup(); eye.position.copy(P.anchor);
+      const eyeMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uDilate: { value: 1 }, uGlow: { value: 1 } },
+        vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uTime, uDilate, uGlow; varying vec3 vP;
+          void main(){
+            vec3 n = normalize(vP);
+            float a = acos(clamp(n.z, -1.0, 1.0)), ph = atan(n.y, n.x);
+            float veins = pow(1.0 - abs(sin(ph * 7.0 + sin(a * 11.0 + ph * 3.0) * 1.4)), 16.0) * smoothstep(0.55, 1.5, a);
+            vec3 col = vec3(0.06, 0.015, 0.1) * (1.2 - 0.5 * smoothstep(0.6, 2.0, a)) + vec3(1.0, 0.1, 0.55) * veins * 0.9 * uGlow;
+            const float R = 0.52;
+            float fib = 0.62 + 0.38 * sin(ph * 64.0 + sin(ph * 11.0) * 2.5) * (0.7 + 0.3 * sin(a * 38.0 - uTime * 0.8));
+            vec3 iris = mix(vec3(1.0, 0.78, 0.18), vec3(0.1, 1.0, 0.75), smoothstep(0.1, R, a)) * fib * (1.6 + 0.4 * uGlow);
+            iris *= 1.0 - 0.8 * smoothstep(R - 0.1, R, a);
+            col = mix(col, iris, 1.0 - smoothstep(R - 0.02, R + 0.02, a));
+            float slit = length(vec2(n.x / (0.035 + 0.15 * uDilate), n.y / 0.4));
+            col *= mix(1.0, smoothstep(0.85, 1.1, slit), step(0.0, n.z));
+            vec2 hs = n.xy - vec2(-0.17, 0.2);
+            col += vec3(1.0) * exp(-dot(hs, hs) * 500.0) * step(0.0, n.z) * 1.4;
+            gl_FragColor = vec4(col, 1.0);
+          }` });
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(RE, 64, 48), eyeMat); eye.add(ball);
+      const lidMat = new THREE.MeshStandardMaterial({ color: C('#3b1838'), roughness: 0.5, metalness: 0, normalMap: TX.rockNormal, normalScale: new THREE.Vector2(1.5, 1.5), emissive: C('#ff3fae'), emissiveIntensity: 0.2, side: THREE.DoubleSide, fog: false, envMapIntensity: 0.8 });
+      const upper = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.05, 64, 24, 0, Math.PI * 2, 0, Math.PI / 2), lidMat);
+      const lower = new THREE.Mesh(new THREE.SphereGeometry(RE * 1.05, 64, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), lidMat);
+      eye.add(upper, lower);
+      const ring = sprite(novaRingTex, HC(1.5, 0.35, 1.2)); eye.add(ring);
+      const aim = new THREE.Object3D(), sac = new THREE.Vector2(), sacNow = new THREE.Vector2(); let sacT = 0;
+      return {
+        start(){ eye.visible = true; aim.position.copy(eye.position); aim.lookAt(camera.position); eye.quaternion.copy(aim.quaternion); sacNow.set(0, 0); sac.set(0, 0); },
+        update(lt, raw, t){
+          const appear = smooth(0, 0.9, lt) * (1 - smooth(D - 0.9, D, lt));
+          eye.scale.setScalar(Math.max(0.001, appear));
+          let open = smooth(1.0, 2.2, lt) * (1 - smooth(7.4, 8.5, lt));
+          open *= 1 - 0.95 * Math.max(0, 1 - Math.abs(lt - 4.9) / 0.18);   // one slow blink
+          upper.rotation.x = -open * 1.2; lower.rotation.x = open * 1.2;
+          aim.position.copy(eye.position); aim.lookAt(camera.position);
+          eye.quaternion.slerp(aim.quaternion, 1 - Math.exp(-raw * 4));   // it follows you around
+          sacT -= raw;
+          if (sacT <= 0){ sacT = 0.35 + rand() * 0.9; sac.set((rand() - 0.5) * 0.2, (rand() - 0.5) * 0.28); }
+          sacNow.lerp(sac, 1 - Math.exp(-raw * 28));
+          ball.rotation.set(sacNow.x, sacNow.y, 0);
+          eyeMat.uniforms.uTime.value = t;
+          eyeMat.uniforms.uDilate.value = lerp(1, 0.12, smooth(2.0, 2.7, lt)) + 0.1 * Math.sin(t * 3.1);
+          eyeMat.uniforms.uGlow.value = 0.7 + 0.3 * Math.sin(t * 2.2);
+          lidMat.emissiveIntensity = 0.2 + 0.8 * (1 - open) * appear;
+          const rk = smooth(0, 1.8, lt); ring.scale.setScalar(RE * (1.4 + 4.5 * rk)); ring.material.opacity = (1 - rk) * 0.9;
+          momentFx.ca += 0.012 * (1 - smooth(0, 0.9, lt));
+        },
+        end(){ eye.visible = false; }
+      };
+    } },
+    { name: 'Ballena de plasma', line: 'Un leviatán de luz nada por la pared del túnel.', dur: 10, make(P){
+      const G = newGroup(), Lw = 6, prof = [];
+      for (let i = 0; i <= 40; i++){ const s = i / 40; prof.push(V2(0.02 + 0.95 * Math.pow(Math.sin(Math.PI * Math.min(1, s * 1.08)), 0.7) * (1 - 0.72 * s), s * Lw - Lw / 2)); }
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uFade: { value: 0 }, uTime: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `uniform float uTime; varying vec3 vN; varying vec3 vV; varying float vS;
+          void main(){ vec3 p = position; float s = clamp((3.0 - p.z) / 6.0, 0.0, 1.0); vS = s; p.y += sin(p.z * 0.9 + uTime * 2.6) * 0.35 * s * s;
+            vec4 mv = modelViewMatrix * vec4(p, 1.0); vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uFade, uTime; varying vec3 vN; varying vec3 vV; varying float vS;
+          void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+            float stripes = 0.6 + 0.4 * sin(vS * 40.0 - uTime * 3.0);
+            vec3 c = mix(vec3(0.15, 0.25, 1.0), vec3(0.4, 1.6, 2.2), f) * (0.1 + 1.8 * f * f) * stripes;
+            gl_FragColor = vec4(c * uFade, 1.0); }` });
+      G.add(new THREE.Mesh(new THREE.LatheGeometry(prof, 48).rotateX(-Math.PI / 2), mat));   // head toward +Z
+      const shape = new THREE.Shape(); shape.moveTo(0, 0); shape.quadraticCurveTo(1.1, 0.2, 1.4, 0.9); shape.quadraticCurveTo(0.6, 0.45, 0, 0.35); shape.quadraticCurveTo(-0.6, 0.45, -1.4, 0.9); shape.quadraticCurveTo(-1.1, 0.2, 0, 0);
+      const flukeMat = holoMat(HC(0.15, 0.25, 1.0), HC(0.4, 1.6, 2.2));
+      const fluke = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12).rotateX(-Math.PI / 2), flukeMat); fluke.position.z = -2.95; G.add(fluke);
+      const dots = pointsOf(40, 0.16, HC(0.8, 2.2, 2.6)); G.add(dots.p);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      const pos = (k, out) => out.lerpVectors(a, b, k).addScaledVector(P.up, Math.sin(k * Math.PI * 2) * 1.2);
+      return {
+        start(){ at(P, -9, -1, 0, a); at(P, 9, 1, 0, b); G.visible = true; },
+        update(lt, raw, t){
+          const k = lt / 10, e = env(lt, 10, 1.0, 1.5);
+          pos(k, G.position); pos(Math.min(1, k + 0.01), _mp); G.lookAt(_mp);
+          mat.uniforms.uFade.value = e; mat.uniforms.uTime.value = t; flukeMat.uniforms.uFade.value = e;
+          fluke.position.y = Math.sin(-2.95 * 0.9 + t * 2.6) * 0.35; fluke.rotation.x = -Math.PI / 2 * 0 + 0.4 * Math.cos(-2.95 * 0.9 + t * 2.6);
+          for (let i = 0; i < 40; i++){ const s = (i % 20) / 20, z = 2.6 - s * 5, side = i < 20 ? 1 : -1, r = 0.8 * Math.pow(Math.sin(Math.PI * Math.min(1, s * 1.08)), 0.7) * (1 - 0.72 * s); dots.pos.set([side * r, Math.sin(z * 0.9 + t * 2.6) * 0.35 * s * s - r * 0.3, z], i * 3); }
+          dots.flush(); dots.mat.opacity = e * (0.6 + 0.4 * Math.sin(t * 4));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Medusas estelares', line: 'Un grupo de medusas bioluminiscentes cruza el vacío.', dur: 10, make(P){
+      const G = newGroup(), J = 6, T8 = 8, SEG = 10, bellGeo = new THREE.SphereGeometry(0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+      const lines = segsOf(J * T8 * SEG, HC(1.6, 0.6, 1.8)); G.add(lines.l);
+      const jellies = [];
+      for (let j = 0; j < J; j++){ const m = holoMat(HC(0.9, 0.2, 1.2), HC(1.8, 1.2, 2.4)); const b = new THREE.Mesh(bellGeo, m); G.add(b); jellies.push({ b, m, x: (j - 2.5) * 1.5 + (Math.random() - 0.5), y: (Math.random() - 0.5) * 3, z: (Math.random() - 0.5) * 2, ph: Math.random() * 6.28, s: 0.6 + Math.random() * 0.6 }); }
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 10, 1.2, 1.5); let n = 0;
+          jellies.forEach((q) => {
+            const pulse = Math.pow(0.5 + 0.5 * Math.sin(t * 2.2 + q.ph), 3), bx = q.x, by = q.y - 2 + lt * 0.35 + pulse * 0.1, bz = q.z;
+            q.b.position.set(bx, by, bz); q.b.scale.set(q.s * (1 - 0.18 * pulse), q.s * (1 + 0.25 * pulse), q.s * (1 - 0.18 * pulse));
+            q.m.uniforms.uFade.value = e;
+            for (let k = 0; k < T8; k++){
+              const a = k / T8 * Math.PI * 2, r0 = 0.45 * q.s;
+              let px = bx + Math.cos(a) * r0, py = by, pz = bz + Math.sin(a) * r0;
+              for (let s = 0; s < SEG; s++){
+                const nx = bx + Math.cos(a) * r0 * (1 - s * 0.06) + Math.sin(t * 2 + s * 0.6 + k) * 0.06 * s, ny = by - (s + 1) * 0.16 * q.s, nz = bz + Math.sin(a) * r0 * (1 - s * 0.06) + Math.cos(t * 1.7 + s * 0.5 + k) * 0.06 * s;
+                lines.pos.set([px, py, pz, nx, ny, nz], n * 6); n++; px = nx; py = ny; pz = nz;
+              }
+            }
+          });
+          lines.flush(); lines.mat.opacity = 0.7 * e;
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Cardumen de cristal', line: 'Peces de vidrio que refractan la luz del agujero.', dur: 9, make(P){
+      const N = 46, geo = new THREE.ConeGeometry(0.09, 0.42, 7).rotateX(Math.PI / 2);   // nose toward +Z
+      const mat = new THREE.MeshPhysicalMaterial({ color: C('#cfefff'), metalness: 0.4, roughness: 0.04, clearcoat: 1, iridescence: 1, iridescenceIOR: 1.6, emissive: C('#3a7cff'), emissiveIntensity: 0.35, envMapIntensity: 2.2, transparent: true, opacity: 0.85 });
+      const fish = new THREE.InstancedMesh(geo, mat, N); fish.visible = false; fish.frustumCulled = false; scene.add(fish);
+      const seeds = []; for (let i = 0; i < N; i++) seeds.push({ o: V(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(2.4), ph: Math.random() * 6.28, sp: 0.8 + Math.random() * 0.5 });
+      const dummy = new THREE.Object3D(), c0 = new THREE.Vector3(), c1 = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3();
+      const centre = (k, out) => out.lerpVectors(a, b, k).addScaledVector(P.up, Math.sin(k * Math.PI * 2) * 1.2);
+      return {
+        start(){ at(P, -7, 0.5, 0, a); at(P, 7, -0.5, 0, b); fish.visible = true; },
+        update(lt, raw, t){
+          const k = lt / 9, e = Math.max(0.001, env(lt, 9, 0.8, 1.0));
+          centre(k, c0); centre(Math.min(1, k + 0.01), c1); c1.sub(c0);
+          seeds.forEach((s, i) => {
+            const sw = t * s.sp + s.ph;
+            dummy.position.copy(c0).add(_mv.copy(s.o).applyAxisAngle(P.out, Math.sin(sw * 0.5) * 0.6)).addScaledVector(P.up, Math.sin(sw) * 0.15);
+            dummy.lookAt(_mp.copy(dummy.position).add(c1));
+            dummy.rotateY(Math.sin(sw * 6) * 0.25);   // tail wiggle
+            dummy.scale.setScalar(e); dummy.updateMatrix(); fish.setMatrixAt(i, dummy.matrix);
+          });
+          fish.instanceMatrix.needsUpdate = true;
+        },
+        end(){ fish.visible = false; }
+      };
+    } },
+    { name: 'Mariposa cuántica', line: 'Cada aleteo cambia el color del universo.', dur: 9, make(P){
+      const G = newGroup();
+      const wingTex = texOf(256, 256, (g) => {
+        const gr = g.createRadialGradient(40, 128, 10, 60, 128, 230); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(120,220,255,0.9)'); gr.addColorStop(0.8, 'rgba(200,80,255,0.7)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.beginPath(); g.moveTo(10, 128); g.bezierCurveTo(60, 0, 250, 10, 230, 110); g.bezierCurveTo(250, 170, 150, 250, 10, 140); g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.9)'; g.beginPath(); g.arc(160, 95, 18, 0, Math.PI * 2); g.fill(); g.fillStyle = 'rgba(40,0,80,0.9)'; g.beginPath(); g.arc(160, 95, 9, 0, Math.PI * 2); g.fill();
+      });
+      const wings = [];
+      for (const s of [-1, 1]){ const geo = new THREE.PlaneGeometry(1.6, 1.6); geo.translate(0.8, 0, 0); const w = new THREE.Mesh(geo, addMat(HC(1.5, 1.5, 1.5), wingTex)); w.scale.x = s; G.add(w); wings.push(w); }
+      G.add(new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.7, 6, 12), lit(HC(1.2, 1.8, 2.2))));
+      const dust = pointsOf(50, 0.12, HC(1.4, 1.2, 2.2)); dust.p.visible = false; scene.add(dust.p);
+      const past = []; for (let i = 0; i < 50; i++) past.push(new THREE.Vector3());
+      return {
+        start(){ G.visible = dust.p.visible = true; at(P, 0, 0, -1, G.position); past.forEach((p) => p.copy(G.position)); },
+        update(lt, raw, t){
+          const e = env(lt, 9, 1.0, 1.2), flap = Math.sin(t * 9);
+          at(P, 2.5 * Math.sin(lt * 0.7), 1.2 * Math.sin(lt * 1.3), -1 + 0.6 * Math.sin(lt * 0.5), G.position); faceCam(G); G.rotateZ(0.3 * Math.sin(lt * 0.9));
+          wings[0].rotation.y = -flap * 0.9; wings[1].rotation.y = flap * 0.9;
+          G.scale.setScalar(Math.max(0.001, e));
+          momentFx.tint.setHSL((t * 0.12) % 1, 1, 0.6); momentFx.tintA = Math.max(momentFx.tintA, (0.3 + 0.1 * flap) * e);
+          const last = past.pop(); last.copy(G.position); past.unshift(last);
+          past.forEach((p, i) => { dust.pos.set([p.x + Math.sin(i * 7.1) * 0.1, p.y - i * 0.01, p.z], i * 3); });
+          dust.flush(); dust.mat.opacity = 0.6 * e;
+        },
+        end(){ G.visible = dust.p.visible = false; }
+      };
+    } },
+    { name: 'Gusano cósmico', line: 'Algo enorme emerge del gas… y vuelve a sumergirse.', dur: 9, make(P){
+      const N = 26, segs = [];
+      for (let i = 0; i < N; i++){ const m = new THREE.Mesh(rockGeos[i % 4], rockMats[1]); m.visible = false; scene.add(m); segs.push(m); }
+      const mouth = new THREE.Group(); mouth.visible = false; scene.add(mouth);
+      for (let i = 0; i < 10; i++){ const a = i / 10 * Math.PI * 2, c = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.35, 6), shell); c.position.set(Math.cos(a) * 0.55, Math.sin(a) * 0.55, 0.2); c.rotation.x = Math.PI / 2; mouth.add(c); }
+      const throat = sprite(novaCoreTex, HC(2.4, 0.6, 0.3)); throat.scale.setScalar(1.4); mouth.add(throat);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      const curve = (s, out) => out.lerpVectors(a, b, s).addScaledVector(P.up, Math.sin(Math.PI * s) * 3.2).addScaledVector(P.out, -Math.sin(Math.PI * s) * 2);
+      return {
+        start(){ at(P, -5, -2.6, 3, a); at(P, 5, -2.6, 3, b); },
+        update(lt, raw, t){
+          const h = lt / 9 * 1.7 - 0.25;
+          segs.forEach((m, i) => { const s = h - i * 0.045; m.visible = s > 0 && s < 1; if (!m.visible) return; curve(s, m.position); m.scale.setScalar(0.85 * (1 - i / N * 0.65)); m.rotation.set(s * 9 + i, s * 5, 0); });
+          const hs = THREE.MathUtils.clamp(h, 0, 0.99); curve(hs, mouth.position); curve(hs + 0.01, _mp); mouth.lookAt(_mp); mouth.visible = h > 0 && h < 1;
+          momentFx.ca += mouth.visible ? 0.008 : 0;
+        },
+        end(){ segs.forEach((m) => { m.visible = false; }); mouth.visible = false; }
+      };
+    } },
+    { name: 'Dragón de nebulosa', line: 'Una serpiente de gas ruge en silencio.', dur: 10, make(P){
+      const N = 40, parts = [];
+      for (let i = 0; i < N; i++){ const s = sprite(nebulaTex, new THREE.Color().setHSL(0.82 - (i / N) * 0.35, 0.9, 0.55).multiplyScalar(1.6)); s.material.rotation = Math.random() * 6; s.visible = false; scene.add(s); parts.push(s); }
+      const eyes = [0, 1].map(() => { const s = sprite(novaCoreTex, HC(2.6, 0.5, 0.3)); s.visible = false; scene.add(s); return s; });
+      const roar = sprite(novaRingTex, HC(1.8, 0.6, 1.6)); roar.visible = false; scene.add(roar);
+      const path = (s, out) => at(P, -7 + s * 14, Math.sin(s * 9) * 1.4, Math.cos(s * 6) * 1.2, out);
+      return {
+        start(){ parts.concat(eyes).forEach((s) => { s.visible = true; }); },
+        update(lt, raw, t){
+          const e = env(lt, 10, 1.2, 1.5), head = lt / 10 * 1.15;
+          parts.forEach((s, i) => { const k = head - i * 0.022; path(Math.max(0, k), s.position); s.scale.setScalar((2.6 - i * 0.045) * e); s.material.opacity = (k > 0 ? 0.8 : 0) * e; s.material.rotation += raw * 0.2; });
+          path(Math.max(0, head), _mp);
+          eyes.forEach((s, j) => { s.position.copy(_mp).addScaledVector(P.up, 0.35).addScaledVector(P.right, (j - 0.5) * 0.6).addScaledVector(P.out, -0.5); s.scale.setScalar(0.7 * e); s.material.opacity = e; });
+          const live = lt > 4.5 && lt < 6, r = smooth(4.5, 6.0, lt);
+          roar.visible = live; roar.position.copy(_mp); roar.scale.setScalar(1 + 10 * r); roar.material.opacity = 1 - r;
+          momentFx.ca += live ? 0.03 * (1 - r) : 0;
+        },
+        end(){ parts.concat(eyes, [roar]).forEach((s) => { s.visible = false; }); }
+      };
+    } },
+    { name: 'Mano gigante', line: 'Algo desde fuera del túnel lo acaricia.', dur: 10, make(P){
+      const G = newGroup(), m = rimMat(HC(0.03, 0.01, 0.06), HC(1.4, 0.5, 2.0));
+      G.add(new THREE.Mesh(roundedBox(2.0, 2.2, 0.55, 0.25), m));
+      const cap = (len) => { const g = new THREE.CapsuleGeometry(0.22, len, 6, 12); g.translate(0, len / 2 + 0.11, 0); return new THREE.Mesh(g, m); };
+      const fingers = [];
+      [[-0.75, 1.1, 0.9], [-0.25, 1.15, 1.05], [0.25, 1.12, 1.0], [0.72, 1.05, 0.8]].forEach(([x, y, l]) => {
+        const f1 = new THREE.Group(); f1.position.set(x, y, 0); G.add(f1); f1.add(cap(0.6 * l));
+        const f2 = new THREE.Group(); f2.position.y = 0.6 * l + 0.1; f1.add(f2); f2.add(cap(0.45 * l));
+        const f3 = new THREE.Group(); f3.position.y = 0.45 * l + 0.1; f2.add(f3); f3.add(cap(0.35 * l));
+        fingers.push([f1, f2, f3]);
+      });
+      const thumb = new THREE.Group(); thumb.position.set(-1.0, -0.4, 0); thumb.rotation.z = 0.9; G.add(thumb); thumb.add(cap(0.9));
+      const haze = sprite(nebulaTex, HC(1.0, 0.4, 1.4)); haze.scale.setScalar(9); G.add(haze);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ at(P, 7, -3, 2, a); at(P, 0.5, -1.2, 0.5, b); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 10, 1.5, 2.0), k = easeIO(smooth(0, 3.5, lt)) * (1 - easeIO(smooth(7.0, 10, lt)));
+          G.position.lerpVectors(a, b, k); faceCam(G); G.rotateZ(0.5 - 0.4 * k); G.scale.setScalar(1.4);
+          const curl = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(lt * 1.3));
+          fingers.forEach((f, i) => { f[0].rotation.x = curl * 0.8 + i * 0.03; f[1].rotation.x = curl; f[2].rotation.x = curl * 0.9; });
+          m.uniforms.uFade.value = e; haze.material.opacity = 0.5 * e;
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Flor estelar', line: 'Una flor de luz se abre solo para ti.', dur: 9, make(P){
+      const G = newGroup();
+      const petalTex = texOf(128, 256, (g) => { const gr = g.createLinearGradient(0, 256, 0, 0); gr.addColorStop(0, 'rgba(255,240,200,1)'); gr.addColorStop(0.5, 'rgba(255,110,200,0.85)'); gr.addColorStop(1, 'rgba(120,80,255,0)'); g.fillStyle = gr; g.beginPath(); g.moveTo(64, 256); g.bezierCurveTo(-10, 170, 20, 30, 64, 0); g.bezierCurveTo(108, 30, 138, 170, 64, 256); g.fill(); });
+      const petals = [];
+      for (let i = 0; i < 10; i++){ const hold = new THREE.Group(); hold.rotation.z = i / 10 * Math.PI * 2; G.add(hold); const geo = new THREE.PlaneGeometry(0.8, 2.0); geo.translate(0, 1.0, 0); const p = new THREE.Mesh(geo, addMat(HC(1.4, 1.4, 1.4), petalTex)); hold.add(p); petals.push(p); }
+      const core = sprite(novaCoreTex, HC(2.4, 1.8, 0.8)); G.add(core);
+      const pollen = pointsOf(70, 0.1, HC(2.4, 2.0, 1.0)); G.add(pollen.p);
+      const ps = []; for (let i = 0; i < 70; i++) ps.push([Math.random() * 6.28, Math.random() * 3]);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9, 0.6, 1.0), open = easeIO(smooth(0.5, 3.0, lt)) * (1 - easeIO(smooth(6.5, 8.5, lt)));
+          petals.forEach((p, i) => { p.rotation.x = lerp(1.35, 0.12, open) + 0.05 * Math.sin(t * 2 + i); });
+          core.scale.setScalar(0.8 + 1.6 * open);
+          ps.forEach((q, i) => { const k = (lt * 0.4 + q[1]) % 3; pollen.pos.set([Math.cos(q[0]) * k * 0.6, Math.sin(q[0]) * k * 0.6, 0.3 + k * 0.5], i * 3); });
+          pollen.flush(); pollen.mat.opacity = open * e;
+          G.rotateZ(raw * 0.15); G.scale.setScalar(Math.max(0.001, e));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Semilla alienígena', line: 'Una semilla germina y crece un árbol de luz.', dur: 9.5, make(P){
+      const G = newGroup(), branches = [];
+      (function grow(x, y, ang, len, depth, born){
+        const x2 = x + Math.sin(ang) * len, y2 = y + Math.cos(ang) * len; branches.push({ x, y, x2, y2, depth, born });
+        if (depth >= 6) return;
+        const n = depth < 2 ? 2 : (Math.random() < 0.7 ? 2 : 3);
+        for (let i = 0; i < n; i++) grow(x2, y2, ang + (i - (n - 1) / 2) * (0.5 + Math.random() * 0.3), len * (0.7 + Math.random() * 0.12), depth + 1, born + 0.55);
+      })(0, -2.2, 0, 1.2, 0, 1.0);
+      const lines = segsOf(branches.length, HC(0.7, 2.2, 1.4)); G.add(lines.l);
+      const tips = branches.filter((b) => b.depth === 6), leaves = pointsOf(tips.length, 0.22, HC(2.2, 1.0, 2.4)); G.add(leaves.p);
+      const seed = sprite(novaCoreTex, HC(0.8, 2.4, 1.2)); seed.position.set(0, -2.2, 0); G.add(seed);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9.5, 0.4, 1.2);
+          branches.forEach((b, i) => { const k = smooth(b.born, b.born + 0.55, lt); lines.pos.set([b.x, b.y, 0, lerp(b.x, b.x2, k), lerp(b.y, b.y2, k), 0], i * 6); });
+          lines.flush(); lines.mat.opacity = e;
+          tips.forEach((b, i) => { const k = smooth(b.born + 0.5, b.born + 0.9, lt); leaves.pos.set([b.x2, b.y2 + 0.04 * Math.sin(t * 3 + i), k > 0 ? 0 : 1e4], i * 3); });
+          leaves.flush(); leaves.mat.opacity = e * (0.7 + 0.3 * Math.sin(t * 4));
+          seed.scale.setScalar((1.2 + 0.4 * Math.sin(t * 6)) * (1 - 0.6 * smooth(1, 2, lt)));
+          G.scale.setScalar(Math.max(0.001, e) * 1.1);
+        },
+        end(){ G.visible = false; }
+      };
+    } }
+  ];
+
+  /* ===== group 3 · visitors ===== */
+  const VISITORS = [
+    { name: 'Visitantes curiosos', line: 'Un platillo escaneó tu traje y saltó al hiperespacio.', dur: 8.6, make(P){
+      const anchor = P.anchor, ufo = newGroup(), spinG = new THREE.Group(); ufo.add(spinG);
+      const hullMat = new THREE.MeshPhysicalMaterial({ color: C('#c3c9d4'), metalness: 1, roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08, normalMap: TX.metalNormal, normalScale: new THREE.Vector2(0.25, 0.25), envMapIntensity: 1.7 });
+      spinG.add(new THREE.Mesh(new THREE.LatheGeometry([V2(0.001, -0.2), V2(0.45, -0.19), V2(0.95, -0.09), V2(1.25, -0.01), V2(1.27, 0.02), V2(1.0, 0.08), V2(0.55, 0.16), V2(0.001, 0.19)], 72), hullMat));
+      const lightMats = [], bulb = new THREE.SphereGeometry(0.055, 10, 8);
+      for (let i = 0; i < 14; i++){ const a = i / 14 * Math.PI * 2, mt = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), fog: false }); const b = new THREE.Mesh(bulb, mt); b.position.set(Math.cos(a) * 1.2, 0, Math.sin(a) * 1.2); spinG.add(b); lightMats.push(mt); }
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.46, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: C('#9dffc8'), roughness: 0.04, clearcoat: 1, transparent: true, opacity: 0.45, emissive: C('#14ff8c'), emissiveIntensity: 0.35, envMapIntensity: 1.5, depthWrite: false }));
+      dome.position.y = 0.15; ufo.add(dome);
+      const pilot = new THREE.Group(); pilot.position.y = 0.22; ufo.add(pilot);
+      pilot.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 24, 16), new THREE.MeshStandardMaterial({ color: C('#3fae6a'), roughness: 0.5 })));
+      const pupilMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 2.6, 2.2), fog: false });
+      for (const sd of [-1, 1]){ const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), pupilMat); e.position.set(sd * 0.055, 0.03, 0.115); e.scale.set(1, 1.4, 0.6); pilot.add(e); }
+      const belly = new THREE.Mesh(new THREE.CircleGeometry(0.5, 40).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 3.0, 1.6), fog: false, side: THREE.DoubleSide }));
+      belly.position.y = -0.2; ufo.add(belly);
+      const beamMat = new THREE.ShaderMaterial({
+        uniforms: { uOn: { value: 0 }, uTime: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uOn, uTime; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main(){
+            float core = abs(dot(normalize(vN), normalize(vV)));
+            float band = pow(fract(vUv.y * 7.0 + uTime * 1.6), 10.0);
+            float fade = smoothstep(0.0, 0.15, vUv.y) * (1.0 - smoothstep(0.85, 1.0, vUv.y));
+            gl_FragColor = vec4(vec3(0.35, 1.0, 0.65) * (0.16 + 1.3 * band) * (0.3 + 0.7 * core) * fade * uOn, 1.0);
+          }` });
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.85, 1, 40, 1, true), beamMat); beam.visible = false; scene.add(beam);
+      const flash = sprite(novaCoreTex, HC(0.8, 2.2, 1.4)); flash.visible = false; scene.add(flash);
+      const from = new THREE.Vector3(), away = V(0.35, 0.75, -1).normalize(), Yup = V(0, 1, 0), aim = new THREE.Object3D(), level = new THREE.Quaternion();
+      let flashPlaced = false;
+      return {
+        start(){ from.copy(anchor).addScaledVector(P.out, 22).addScaledVector(P.up, 7); ufo.position.copy(from); ufo.visible = true; flashPlaced = false; },
+        update(lt, raw, t){
+          const A = astro.position, arrive = easeIO(smooth(0, 1.8, lt)), leave = Math.max(0, lt - 7.2);
+          ufo.position.lerpVectors(from, anchor, arrive); ufo.position.y += 0.12 * Math.sin(t * 2.3);
+          if (leave > 0) ufo.position.addScaledVector(away, leave * leave * 160);
+          spinG.rotation.y += raw * (2.2 + 7 * (1 - arrive) + 14 * leave);
+          // tip the saucer partway toward the astronaut, then a curious head tilt before leaving
+          aim.position.copy(ufo.position); aim.lookAt(A); aim.rotateX(-Math.PI / 2);
+          ufo.quaternion.copy(level).slerp(aim.quaternion, 0.45);
+          ufo.rotateZ(0.28 * Math.sin(lt * 6.0) * smooth(6.3, 6.6, lt) * (1 - smooth(7.0, 7.2, lt)));
+          ufo.updateMatrixWorld(true);
+          pilot.lookAt(camera.position);
+          lightMats.forEach((mt, i) => { mt.color.setHSL((t * 0.5 + i / lightMats.length) % 1, 1, 0.55).multiplyScalar(2.0 + 1.6 * Math.max(0, Math.sin(t * 9 - i))); });
+          const on = smooth(1.9, 2.4, lt) * (1 - smooth(6.0, 6.4, lt));
+          beam.visible = on > 0.001;
+          if (beam.visible){
+            _mp.copy(A).add(_mv.set(0.25 * Math.sin(t * 1.7), 0.3 * Math.sin(t * 1.1), 0));   // the beam sweeps over the suit
+            ufo.localToWorld(_ms.set(0, -0.2, 0));
+            _mto.copy(_ms).sub(_mp); const len = _mto.length(); _mto.normalize();
+            beam.position.copy(_mp).addScaledVector(_mto, len / 2); beam.quaternion.setFromUnitVectors(Yup, _mto); beam.scale.set(1, len, 1);
+          }
+          beamMat.uniforms.uOn.value = on; beamMat.uniforms.uTime.value = t;
+          lampLens.emissiveIntensity = 1.5 + on * (Math.sin(t * 38) > 0 ? 2.2 : -1.3);   // the helmet lamps stutter under the scan
+          const fl = smooth(7.1, 7.3, lt) * (1 - smooth(7.4, 8.4, lt));
+          flash.visible = fl > 0.001;
+          if (flash.visible){ if (!flashPlaced){ flash.position.copy(ufo.position); flashPlaced = true; } flash.material.opacity = fl; flash.scale.setScalar(1.5 + 10 * smooth(7.1, 8.4, lt)); }
+          if (lt > 8.0) ufo.visible = false;
+          momentFx.ca += 0.02 * fl;
+        },
+        end(){ ufo.visible = beam.visible = flash.visible = false; lampLens.emissiveIntensity = 1.5; }
+      };
+    } },
+    { name: 'Pulpo mecánico', line: 'Una sonda con tentáculos se acerca a examinarte.', dur: 9, make(P){
+      const G = newGroup();
+      G.add(new THREE.Mesh(new THREE.SphereGeometry(0.45, 40, 24), alu));
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 12), lit(HC(3.0, 0.3, 0.2))); eye.position.z = 0.4; G.add(eye);
+      const eyeGlow = sprite(novaCoreTex, HC(2.4, 0.3, 0.2)); eyeGlow.position.z = 0.5; eyeGlow.scale.setScalar(0.8); G.add(eyeGlow);
+      const T8 = 8, S = 11, balls = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), anodBlue, T8 * S); balls.frustumCulled = false; G.add(balls);
+      const dummy = new THREE.Object3D(), a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ a.copy(P.anchor); b.lerpVectors(P.anchor, astro.position, 0.55); G.position.copy(a); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9, 0.8, 1.0), k = easeIO(smooth(0.5, 3.5, lt)) * (1 - easeIO(smooth(6.0, 8.5, lt)));
+          G.position.lerpVectors(a, b, k); G.lookAt(astro.position); G.scale.setScalar(Math.max(0.001, e) * 1.2);
+          let n = 0;
+          for (let i = 0; i < T8; i++){
+            const ang = i / T8 * Math.PI * 2;
+            for (let j = 0; j < S; j++){
+              const s = j / S, w = Math.sin(t * 3 + i + s * 5) * 0.35 * s;
+              dummy.position.set(Math.cos(ang) * (0.35 + s * 0.5) + Math.cos(ang + 1.5) * w, Math.sin(ang) * (0.35 + s * 0.5) + Math.sin(ang + 1.5) * w, -0.2 - s * 1.6);
+              dummy.scale.setScalar(0.09 * (1 - s * 0.6)); dummy.updateMatrix(); balls.setMatrixAt(n++, dummy.matrix);
+            }
+          }
+          balls.instanceMatrix.needsUpdate = true;
+          eye.position.x = eyeGlow.position.x = 0.12 * Math.sin(t * 2.5);   // the eye scans
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Nave nodriza', line: 'Una sombra colosal pasa sobre el túnel.', dur: 11, make(P){
+      const G = newGroup();
+      const hull = new THREE.MeshStandardMaterial({ color: C('#1a1c24'), roughness: 0.6, metalness: 0.7, normalMap: TX.metalNormal, envMapIntensity: 0.6 });
+      G.add(new THREE.Mesh(new THREE.LatheGeometry([V2(0.001, -1.2), V2(5, -1.0), V2(11, -0.3), V2(12, 0), V2(9, 0.8), V2(4, 1.8), V2(0.001, 2.2)], 96), hull));
+      const lights = pointsOf(140, 0.5, HC(2.6, 1.8, 0.8)); G.add(lights.p);
+      for (let i = 0; i < 140; i++){ const a = i / 70 * Math.PI * 2, r = i < 70 ? 11.5 : 8.5; lights.pos.set([Math.cos(a) * r, i < 70 ? -0.2 : 0.75, Math.sin(a) * r], i * 3); }
+      lights.flush();
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(4, 0.25, 12, 96).rotateX(Math.PI / 2), lit(HC(0.6, 1.8, 2.6))); ring.position.y = -1.15; G.add(ring);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ at(P, -38, 4, 22, a); at(P, 38, 4, 22, b); G.visible = true; },
+        update(lt, raw, t){ G.position.lerpVectors(a, b, lt / 11); G.rotation.y += raw * 0.05; momentFx.dim += 0.45 * env(lt, 11, 2, 2); lights.mat.opacity = 0.6 + 0.4 * Math.sin(t * 3); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Holograma', line: 'Un mensaje grabado hace eones: «Bienvenido, terrícola».', dur: 9, make(P){
+      const G = newGroup(), L = liveTex(256, 320);
+      const holo = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 2.5), addMat(HC(1.3, 1.6, 1.6), L.tx)); holo.position.y = 0.2; G.add(holo);
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.15, 32), alu); base.position.y = -1.0; G.add(base);
+      const cone = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 0.4, 1.6, 32, 1, true), addMat(HC(0.25, 0.6, 0.6))); cone.position.y = -0.2; G.add(cone);
+      function draw(lt){
+        const g = L.g; g.clearRect(0, 0, 256, 320); g.save();
+        g.shadowColor = '#5ce1ff'; g.shadowBlur = 14; g.strokeStyle = '#8ff4ff'; g.fillStyle = 'rgba(92,225,255,0.35)'; g.lineWidth = 4;
+        g.beginPath(); g.ellipse(128, 105, 62, 78, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+        g.fillStyle = '#e8ffff'; g.beginPath(); g.ellipse(102, 100, 18, 28, -0.4, 0, Math.PI * 2); g.ellipse(154, 100, 18, 28, 0.4, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.moveTo(108, 150); g.quadraticCurveTo(128, 162, 148, 150); g.stroke();
+        g.save(); g.translate(215, 200); g.rotate(-0.5 + Math.sin(lt * 7) * 0.5); g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -60); g.stroke();   // waving hand
+        for (let f = -1; f <= 1; f++){ g.beginPath(); g.moveTo(0, -60); g.lineTo(f * 12, -82); g.stroke(); }
+        g.restore();
+        g.font = '600 18px "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.fillStyle = '#c9fbff';
+        const msg = 'BIENVENIDO, TERRÍCOLA'; g.fillText(msg.slice(0, Math.floor(Math.min(1, lt / 3) * msg.length)), 128, 290);
+        g.restore();
+        g.fillStyle = 'rgba(0,0,0,0.35)'; for (let y = (lt * 40) % 4; y < 320; y += 4) g.fillRect(0, y, 256, 1.5);   // scanlines
+        L.tx.needsUpdate = true;
+      }
+      let acc = 0;
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; draw(0); },
+        update(lt, raw, t){ const e = env(lt, 9, 0.6, 1.0), fl = reduceMotion ? 1 : (Math.sin(t * 43) > -0.85 ? 1 : 0.4); holo.material.opacity = e * fl; cone.material.opacity = 0.6 * e; acc += raw; if (acc > 1 / 30){ acc = 0; draw(lt); } },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Firma alienígena', line: 'Unos glifos se escriben solos en el aire.', dur: 8.5, make(P){
+      const G = newGroup(), L = liveTex(512, 256);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 2.2), addMat(HC(1.6, 1.6, 1.6), L.tx)); G.add(plane);
+      let strokes = [];
+      function compose(){
+        strokes = [];
+        for (let gi = 0; gi < 6; gi++){
+          const cx = 50 + gi * 82, n = 3 + ((Math.random() * 3) | 0);
+          for (let s = 0; s < n; s++){
+            const p = []; let x = cx + (Math.random() - 0.5) * 40, y = 128 + (Math.random() - 0.5) * 80;
+            for (let k = 0; k < 4; k++){ p.push([x, y]); x = Math.max(cx - 34, Math.min(cx + 34, x + (Math.random() - 0.5) * 50)); y = Math.max(50, Math.min(206, y + (Math.random() - 0.5) * 60)); }
+            strokes.push(p);
           }
         }
-      },
-      end(){ bh.visible = false; pop.visible = false; release(); } });
-  }
+      }
+      function draw(prog){
+        const g = L.g; g.clearRect(0, 0, 512, 256); g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#ffd6ff'; g.shadowColor = '#ff5fc6'; g.shadowBlur = 16; g.lineWidth = 6;
+        const upto = prog * strokes.length;
+        strokes.forEach((p, i) => {
+          const k = THREE.MathUtils.clamp(upto - i, 0, 1); if (k <= 0) return;
+          const segs = (p.length - 1) * k; g.beginPath(); g.moveTo(p[0][0], p[0][1]);
+          for (let j = 1; j <= Math.ceil(segs); j++){ const f = Math.min(1, segs - (j - 1)); g.lineTo(lerp(p[j - 1][0], p[j][0], f), lerp(p[j - 1][1], p[j][1], f)); }
+          g.stroke();
+        });
+        L.tx.needsUpdate = true;
+      }
+      let acc = 0;
+      return {
+        start(){ compose(); G.position.copy(P.anchor); faceCam(G); G.visible = true; draw(0); },
+        update(lt, raw, t){ acc += raw; if (acc > 1 / 30){ acc = 0; draw(smooth(0.5, 5.5, lt)); } plane.material.opacity = env(lt, 8.5, 0.3, 1.5) * (0.85 + 0.15 * Math.sin(t * 5)); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Faro alienígena', line: 'Te vio mirarlo… y te respondió.', dur: 8.5, make(P){
+      const G = newGroup();
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), new THREE.MeshPhysicalMaterial({ color: C('#bbffff'), metalness: 0.2, roughness: 0.05, clearcoat: 1, iridescence: 1, emissive: C('#5ce1ff'), emissiveIntensity: 0.5, envMapIntensity: 2, flatShading: true }));
+      crystal.scale.y = 1.6; G.add(crystal);
+      const light = sprite(novaCoreTex, HC(1.0, 2.4, 2.6)); light.scale.setScalar(3); G.add(light);
+      const rings = []; for (let i = 0; i < 4; i++){ const r = sprite(novaRingTex, HC(0.6, 2.4, 1.2)); r.visible = false; scene.add(r); rings.push(r); }
+      const code = [1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0];   // short and long pulses
+      return {
+        start(){ G.position.copy(P.anchor); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 8.5, 0.6, 1.0), answer = smooth(3.6, 4.0, lt);
+          const on = code[Math.floor(lt * (answer > 0.5 ? 9 : 4)) % code.length];
+          crystal.rotation.y += raw * (0.6 + 2.5 * answer); crystal.material.emissiveIntensity = (0.3 + 2.2 * on) * e;
+          crystal.material.emissive.setRGB(lerp(0.36, 0.3, answer), lerp(0.88, 1.0, answer), lerp(1.0, 0.45, answer));
+          light.material.opacity = (0.2 + 0.8 * on) * e; light.material.color.setRGB(lerp(1.0, 0.5, answer), 2.4, lerp(2.6, 1.0, answer));
+          G.scale.setScalar(Math.max(0.001, e));
+          rings.forEach((r, i) => { const live = lt > 4 + i * 0.6 && lt < 7.5; r.visible = live; if (!live) return; const k = ((lt - 4 - i * 0.6) % 2.4) / 2.4; r.position.lerpVectors(G.position, camera.position, k * 0.5); r.scale.setScalar(1 + 4 * k); r.material.opacity = (1 - k) * 0.9; });
+        },
+        end(){ G.visible = false; rings.forEach((r) => { r.visible = false; }); }
+      };
+    } },
+    { name: 'Ascensor cósmico', line: 'Una plataforma sube y baja llevando a un pasajero diminuto.', dur: 9, make(P){
+      const G = newGroup();
+      const column = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 8, 32, 1, true), addMat(HC(0.2, 0.55, 0.4))); G.add(column);
+      const plat = new THREE.Group(); G.add(plat);
+      plat.add(new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.75, 0.12, 40), alu));
+      const lr = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.03, 8, 64).rotateX(Math.PI / 2), lit(HC(0.5, 2.6, 1.4))); plat.add(lr);
+      const alienTex = texOf(64, 128, (g) => {
+        g.fillStyle = '#7dff9a'; g.shadowColor = '#3dff7a'; g.shadowBlur = 8;
+        g.beginPath(); g.ellipse(32, 30, 16, 20, 0, 0, Math.PI * 2); g.fill(); g.fillRect(24, 48, 16, 44); g.fillRect(14, 54, 36, 6); g.fillRect(22, 90, 6, 30); g.fillRect(36, 90, 6, 30);
+        g.shadowBlur = 0; g.fillStyle = '#003311'; g.beginPath(); g.ellipse(25, 30, 5, 8, -0.4, 0, Math.PI * 2); g.ellipse(39, 30, 5, 8, 0.4, 0, Math.PI * 2); g.fill();
+      });
+      const alien = new THREE.Sprite(new THREE.SpriteMaterial({ map: alienTex, transparent: true, depthWrite: false, fog: false })); alien.scale.set(0.35, 0.7, 1); alien.position.y = 0.42; plat.add(alien);
+      return {
+        start(){ G.position.copy(P.anchor); G.quaternion.setFromUnitVectors(V(0, 1, 0), P.up); G.visible = true; },
+        update(lt, raw, t){ const e = env(lt, 9, 0.6, 1.0); plat.position.y = 3.2 * Math.sin(lt * 1.1 - 1.2); column.material.opacity = 0.6 * e; G.scale.setScalar(Math.max(0.001, e)); lr.material.color.setHSL((t * 0.2) % 1, 1, 0.6).multiplyScalar(2.2); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Ciudad flotante', line: 'Una metrópolis alienígena asoma entre la niebla.', dur: 10, make(P){
+      const G = newGroup();
+      const win = texOf(64, 128, (g) => { g.fillStyle = '#05060a'; g.fillRect(0, 0, 64, 128); for (let y = 4; y < 128; y += 8) for (let x = 4; x < 64; x += 8) if (Math.random() < 0.55){ g.fillStyle = Math.random() < 0.8 ? '#ffd27a' : '#7ae8ff'; g.fillRect(x, y, 4, 4); } });
+      const towerMat = new THREE.MeshStandardMaterial({ color: C('#1b1e2a'), roughness: 0.5, metalness: 0.6, emissive: C('#ffffff'), emissiveMap: win, emissiveIntensity: 1.6, envMapIntensity: 0.7 });
+      const rockBase = new THREE.Mesh(rockGeos[2], rockMats[2]); rockBase.scale.set(3.4, 1.2, 2.6); rockBase.position.y = -1.1; G.add(rockBase);
+      for (let i = 0; i < 18; i++){
+        const h = 0.8 + Math.random() * 2.8, w = 0.25 + Math.random() * 0.35;
+        const m = new THREE.Mesh(i % 3 ? new THREE.BoxGeometry(w, h, w) : new THREE.CylinderGeometry(w * 0.4, w * 0.6, h, 10), towerMat);
+        m.position.set((Math.random() - 0.5) * 4.6, -0.2 + h / 2, (Math.random() - 0.5) * 3); G.add(m);
+        if (i % 4 === 0){ const tip = sprite(novaCoreTex, HC(2.6, 0.4, 0.3)); tip.scale.setScalar(0.35); tip.position.set(m.position.x, -0.1 + h, m.position.z); G.add(tip); }
+      }
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ at(P, 0, -0.5, 12, a); at(P, 0, -0.5, 2.5, b); G.quaternion.setFromUnitVectors(V(0, 1, 0), P.up); G.visible = true; },
+        update(lt, raw, t){ G.position.lerpVectors(a, b, easeIO(smooth(0, 5, lt))); G.rotateY(raw * 0.08); G.scale.setScalar(Math.max(0.001, env(lt, 10, 1.5, 1.5))); towerMat.emissiveIntensity = 1.6 * (0.85 + 0.15 * Math.sin(t * 5)); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Astronauta perdido', line: 'Otro astronauta te saluda a lo lejos… y se desvanece.', dur: 9, make(P){
+      const { c: twin, dst } = cloneClean(astro);
+      twin.traverse((o) => { if (o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
+      twin.visible = false; scene.add(twin);
+      const iUp = astroNodes.indexOf(arms[0].up.g), iFo = astroNodes.indexOf(arms[0].fo.g);
+      const a = new THREE.Vector3(), b = new THREE.Vector3(), aim = new THREE.Object3D(), qUp = new THREE.Quaternion(), upDir = V(0.75, 0.75, 0.25).normalize();
+      return {
+        start(){ at(P, 0.6, 0, 1.5, a); at(P, 2.0, 0.6, 8, b); twin.visible = true; },
+        update(lt, raw, t){
+          for (let i = 1; i < astroNodes.length; i++) dst[i].quaternion.copy(astroNodes[i].quaternion);   // it moves like you…
+          dst[iUp].quaternion.setFromUnitVectors(DOWN, upDir);   // …except for one arm, waving
+          qUp.copy(dst[iUp].quaternion).invert();
+          dst[iFo].quaternion.setFromUnitVectors(DOWN, _mp.set(0.35 * Math.sin(t * 7), 1, 0.2).normalize().applyQuaternion(qUp));
+          twin.position.lerpVectors(a, b, smooth(4.5, 9, lt));
+          aim.position.copy(twin.position); aim.lookAt(camera.position); twin.quaternion.copy(aim.quaternion);
+          twin.scale.setScalar(Math.max(0.001, env(lt, 9, 0.8, 0.8)));
+        },
+        end(){ twin.visible = false; }
+      };
+    } },
+    { name: 'Satélite antiguo', line: 'Un Sputnik perdido sigue emitiendo su «bip-bip».', dur: 9, make(P){
+      const G = newGroup();
+      G.add(new THREE.Mesh(new THREE.SphereGeometry(0.42, 40, 24), alu));
+      for (let i = 0; i < 4; i++){ const g = new THREE.CylinderGeometry(0.012, 0.012, 2.6, 6); g.translate(0, -1.3, 0); const ant = new THREE.Mesh(g, alu); ant.position.set(i < 2 ? 0.2 : -0.2, 0, i % 2 ? 0.2 : -0.2); ant.rotation.set(i % 2 ? 0.35 : -0.35, 0, i < 2 ? 2.5 : -2.5); G.add(ant); }
+      const beep = sprite(novaCoreTex, HC(2.2, 2.4, 2.6)); G.add(beep);
+      const ring = sprite(novaRingTex, HC(1.2, 2.0, 2.4)); G.add(ring);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ at(P, -4.5, 1.2, 0, a); at(P, 4.5, -0.8, 0.5, b); G.visible = true; },
+        update(lt, raw, t){
+          G.position.lerpVectors(a, b, lt / 9); G.rotation.x += raw * 0.3; G.rotation.z += raw * 0.2;
+          const ph = (lt % 0.9) / 0.9, on = ph < 0.12 ? 1 : 0;
+          beep.scale.setScalar(0.4 + 1.8 * on); beep.material.opacity = 0.3 + 0.7 * on; ring.scale.setScalar(0.5 + 5 * ph); ring.material.opacity = (1 - ph) * 0.7;
+          G.scale.setScalar(Math.max(0.001, env(lt, 9, 0.6, 0.8)));
+        },
+        end(){ G.visible = false; }
+      };
+    } }
+  ];
 
-  /* gaze: keep the centre of the view on a glint to set its moment off */
-  let found = 0, toastTimer = 0, toastHide = 0;
-  function announce(m){
-    let fresh = false;
-    if (!m.found){ m.found = true; found++; fresh = true; }
-    if (MUI.count) MUI.count.textContent = found + '/' + moments.length;
-    if (MUI.hint && found === moments.length) MUI.hint.textContent = '¡los encontraste todos!';
+  /* ===== group 4 · extreme physics ===== */
+  const PHYSICS = [
+    { name: 'Micro agujero negro', line: 'La luz se dobla a su alrededor… y se traga un fragmento.', dur: 10, make(P){
+      const RH = 0.5, bh = newGroup(); bh.position.copy(P.anchor);
+      bh.add(new THREE.Mesh(new THREE.SphereGeometry(RH, 40, 24), new THREE.MeshBasicMaterial({ color: 0x000000, fog: false })));
+      const diskMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uFade: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uTime, uFade; varying vec2 vP;
+          void main(){
+            float r = length(vP), a = atan(vP.y, vP.x);
+            float k = clamp((r - 0.62) / 1.5, 0.0, 1.0);
+            float swirl = 0.5 + 0.5 * sin(a * 3.0 - uTime * 3.0 / (r * r) + r * 9.0);
+            float grain = 0.6 + 0.4 * sin(a * 13.0 - uTime * 5.0 / r + r * 27.0);
+            float heat = pow(1.0 - k, 2.2);
+            vec3 c = mix(vec3(1.0, 0.22, 0.05), vec3(1.0, 0.92, 0.75), heat);
+            float beaming = 0.35 + 0.65 * (0.5 + 0.5 * sin(a));
+            float I = heat * (0.35 + 0.65 * swirl * grain) * beaming * smoothstep(0.0, 0.05, k) * (1.0 - smoothstep(0.8, 1.0, k));
+            gl_FragColor = vec4(c * I * 3.2 * uFade, 1.0);
+          }` });
+      const disk = new THREE.Mesh(new THREE.RingGeometry(0.62, 2.12, 160, 1), diskMat); disk.rotation.set(1.15, 0.3, 0); bh.add(disk);
+      const halo = sprite(novaRingTex, HC(1.3, 0.8, 0.45)); halo.scale.setScalar(2.6); bh.add(halo);
+      const pop = sprite(novaCoreTex, HC(1.6, 1.5, 2.4)); pop.position.copy(P.anchor); pop.visible = false; scene.add(pop);
+      const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), preyScale = new THREE.Vector3();
+      let prey = null, preyAng = 0;
+      const release = () => { if (!prey) return; prey.mesh.scale.copy(preyScale); prey.captured = false; place(prey, false); prey = null; };
+      return {
+        start(){
+          bh.visible = true;
+          const pool = debris.filter((d) => !d.big && !d.captured && d.mesh.scale.x < 0.4);
+          prey = pool.length ? pool[(Math.random() * pool.length) | 0] : null;
+          if (prey){ prey.captured = true; preyScale.copy(prey.mesh.scale); preyAng = Math.random() * 6.28; }
+        },
+        update(lt, raw, t){
+          const grow = easeIO(smooth(0, 1.2, lt)), shrink = 1 - smooth(7.0, 8.6, lt), s = Math.max(0.001, grow * shrink);
+          bh.scale.setScalar(s);
+          diskMat.uniforms.uTime.value = t; diskMat.uniforms.uFade.value = grow * (1 + 1.2 * smooth(6.5, 8.4, lt));   // it flares up as it evaporates
+          halo.material.opacity = 0.6; halo.material.rotation += raw * 0.4;
+          if (prey){
+            if (lt < 6.4){
+              const k = smooth(1.4, 6.4, lt), r = lerp(4.5, 0.5, easeIO(k));
+              e1.set(1, 0, 0).applyQuaternion(disk.quaternion); e2.set(0, 1, 0).applyQuaternion(disk.quaternion);
+              preyAng += raw * (0.5 + 2.6 / Math.max(r, 0.45));   // faster and faster as it falls in
+              prey.mesh.position.copy(bh.position).addScaledVector(e1, Math.cos(preyAng) * r).addScaledVector(e2, Math.sin(preyAng) * r);
+              prey.mesh.scale.copy(preyScale).multiplyScalar(Math.max(0.02, 1 - 0.95 * smooth(0.55, 1, k)));
+              prey.mesh.rotation.z += raw * 8 * k;
+            } else release();
+          }
+          const p = smooth(8.4, 8.6, lt) * (1 - smooth(8.7, 9.9, lt));   // the last flash as it evaporates
+          pop.visible = p > 0.001; if (pop.visible){ pop.material.opacity = p; pop.scale.setScalar(1 + 7 * smooth(8.4, 9.9, lt)); }
+          momentFx.ca += 0.02 * p;
+          // gravitational lensing is drawn in the final pass, centred on the hole
+          if (s > 0.01){
+            _mndc.copy(bh.position).project(camera);
+            if (_mndc.z < 1 && Math.abs(_mndc.x) < 1.5 && Math.abs(_mndc.y) < 1.5){
+              const r = 0.5 * RH * s / (camera.position.distanceTo(bh.position) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+              momentFx.lensK = Math.pow(r * 2.0, 2); momentFx.lensR = r; momentFx.lensX = _mndc.x * 0.5 + 0.5; momentFx.lensY = _mndc.y * 0.5 + 0.5;
+            }
+          }
+        },
+        end(){ bh.visible = pop.visible = false; release(); }
+      };
+    } },
+    { name: 'Teseracto', line: 'Un cubo de cuatro dimensiones se pliega sobre sí mismo.', dur: 9, make(P){
+      const G = newGroup(), V4 = [], E4 = [];
+      for (let i = 0; i < 16; i++) V4.push([(i & 1) ? 1 : -1, (i & 2) ? 1 : -1, (i & 4) ? 1 : -1, (i & 8) ? 1 : -1]);
+      for (let i = 0; i < 16; i++) for (let b = 0; b < 4; b++){ const j = i ^ (1 << b); if (j > i) E4.push([i, j]); }
+      const lines = segsOf(E4.length, HC(0.8, 2.2, 2.6)); G.add(lines.l);
+      const verts = pointsOf(16, 0.22, HC(2.4, 2.4, 2.6)); G.add(verts.p);
+      const P3 = new Float32Array(48);
+      const rot = (p, i, j, a) => { const c = Math.cos(a), s = Math.sin(a), x = p[i], y = p[j]; p[i] = x * c - y * s; p[j] = x * s + y * c; };
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          for (let i = 0; i < 16; i++){
+            const p = V4[i].slice(); rot(p, 0, 3, lt * 0.9); rot(p, 1, 2, lt * 0.6); rot(p, 2, 3, lt * 0.42);   // rotations in 4D, then a perspective drop to 3D
+            const k = 1.6 / (3 - p[3]); P3[i * 3] = p[0] * k; P3[i * 3 + 1] = p[1] * k; P3[i * 3 + 2] = p[2] * k;
+          }
+          E4.forEach(([i, j], n) => { lines.pos.set([P3[i * 3], P3[i * 3 + 1], P3[i * 3 + 2], P3[j * 3], P3[j * 3 + 1], P3[j * 3 + 2]], n * 6); });
+          verts.pos.set(P3); lines.flush(); verts.flush();
+          G.scale.setScalar(Math.max(0.001, env(lt, 9, 0.8, 1.0)) * 1.3); G.rotateZ(raw * 0.1);
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Fractura del espacio', line: 'El espacio se agrieta como un vidrio… y se repara solo.', dur: 8, make(P){
+      const G = newGroup(), L = liveTex(512, 512);
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), addMat(HC(1.6, 1.8, 2.0), L.tx)); G.add(plane);
+      let cracks = [];
+      function compose(){
+        cracks = [];
+        const rays = 11 + ((Math.random() * 5) | 0);
+        for (let i = 0; i < rays; i++){ let a = i / rays * Math.PI * 2 + Math.random() * 0.3, x = 256, y = 256; const pts = [[x, y]], len = 150 + Math.random() * 100; for (let s = 0; s < 6; s++){ a += (Math.random() - 0.5) * 0.5; x += Math.cos(a) * len / 6; y += Math.sin(a) * len / 6; pts.push([x, y]); } cracks.push(pts); }
+        for (let r = 1; r <= 3; r++){ const pts = []; for (let i = 0; i <= 24; i++){ const a = i / 24 * Math.PI * 2, rr = r * 45 + (Math.random() - 0.5) * 14; pts.push([256 + Math.cos(a) * rr, 256 + Math.sin(a) * rr]); } cracks.push(pts); }
+      }
+      function draw(p){
+        const g = L.g; g.clearRect(0, 0, 512, 512); g.strokeStyle = '#e8fbff'; g.shadowColor = '#7df3ff'; g.shadowBlur = 10; g.lineWidth = 2.5;
+        if (p > 0.001) cracks.forEach((pts) => { const n = Math.max(1, Math.floor(p * (pts.length - 1) + 0.001)); g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i <= n && i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); g.stroke(); });
+        L.tx.needsUpdate = true;
+      }
+      const shardGeo = new THREE.BufferGeometry().setFromPoints([V(0, 0.18, 0), V(-0.12, -0.1, 0), V(0.14, -0.08, 0)]);
+      const shards = [];
+      for (let i = 0; i < 26; i++){ const m = new THREE.Mesh(shardGeo, addMat(HC(1.4, 1.8, 2.2))); m.userData.dir = V(Math.random() - 0.5, Math.random() - 0.5, Math.random() * 0.8).normalize(); m.userData.spin = V(Math.random(), Math.random(), Math.random()).multiplyScalar(6); G.add(m); shards.push(m); }
+      let acc = 0;
+      return {
+        start(){ compose(); G.position.copy(P.anchor); faceCam(G); G.visible = true; draw(0); },
+        update(lt, raw, t){
+          const crack = smooth(0.2, 0.9, lt) * (1 - smooth(5.0, 7.2, lt));
+          acc += raw; if (acc > 1 / 30){ acc = 0; draw(crack); }
+          plane.material.opacity = Math.min(1, crack * 1.5);
+          const fly = smooth(0.3, 2.0, lt) * (1 - smooth(4.0, 6.2, lt));   // out, then back into place
+          shards.forEach((m) => { m.position.copy(m.userData.dir).multiplyScalar(fly * 3.2); m.rotation.set(m.userData.spin.x * fly, m.userData.spin.y * fly, m.userData.spin.z * fly); m.material.opacity = fly; });
+          momentFx.ca += 0.05 * smooth(0.15, 0.2, lt) * (1 - smooth(0.2, 0.8, lt));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Espejo del túnel', line: 'Un lago de mercurio refleja el agujero de gusano.', dur: 9, make(P){
+      const G = newGroup(), geo = new THREE.RingGeometry(0.001, 2.3, 96, 24), base = geo.attributes.position.array.slice();
+      G.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: C('#ffffff'), metalness: 1, roughness: 0.02, envMapIntensity: 1.8, side: THREE.DoubleSide })));
+      G.add(new THREE.Mesh(new THREE.TorusGeometry(2.32, 0.06, 12, 128), alu));
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.rotateX(-0.5); G.visible = true; },
+        update(lt, raw, t){
+          const pos = geo.attributes.position, amp = 0.09 * (1 - smooth(1, 8, lt));
+          for (let i = 0; i < pos.count; i++){ const r = Math.hypot(base[i * 3], base[i * 3 + 1]); pos.setZ(i, Math.sin(r * 7 - lt * 5) * amp * Math.exp(-r * 0.35)); }
+          pos.needsUpdate = true; geo.computeVertexNormals();
+          G.scale.setScalar(Math.max(0.001, env(lt, 9, 0.8, 1.0)));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Ojo de la tormenta', line: 'Un remolino gira al revés que todo lo demás.', dur: 9, make(P){
+      const G = newGroup(), N = 600, pts = pointsOf(N, 0.12, HC(0.9, 1.8, 2.2)); G.add(pts.p);
+      const seeds = []; for (let i = 0; i < N; i++) seeds.push({ r: 0.3 + Math.random() * 2.8, a: Math.random() * 6.28, z: Math.random() });
+      const calm = sprite(novaCoreTex, HC(2.0, 2.4, 2.6)); calm.scale.setScalar(1.6); G.add(calm);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9, 1.0, 1.2);
+          seeds.forEach((s, i) => { s.a -= raw * (2.2 / s.r); s.r -= raw * 0.12; if (s.r < 0.3) s.r = 3.1; pts.pos.set([Math.cos(s.a) * s.r, Math.sin(s.a) * s.r, -(3.1 - s.r) * 0.6 + s.z * 0.3], i * 3); });
+          pts.flush(); pts.mat.opacity = e; calm.material.opacity = e * (0.7 + 0.3 * Math.sin(t * 2));
+          G.scale.setScalar(0.6 + 0.4 * e);
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Escalera de Penrose', line: 'Una escalera imposible: siempre sube y vuelve al inicio.', dur: 9.5, make(P){
+      const G = newGroup(), N = 16, side = 4, half = 1.6, rise = 0.14;
+      const stone = new THREE.MeshStandardMaterial({ color: C('#d8d2ff'), roughness: 0.6, emissive: C('#3a2a7a'), emissiveIntensity: 0.4, envMapIntensity: 0.8 });
+      const corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
+      const posOf = (k, out) => { const s = ((k % N) + N) % N, edge = Math.floor(s / side), f = (s % side) / side, p0 = corners[edge], p1 = corners[(edge + 1) % 4]; return out.set(lerp(p0[0], p1[0], f), 0, lerp(p0[1], p1[1], f)); };
+      const topOf = (k) => -1 + 0.3 + (((k % N) + N) % N) * rise;
+      for (let k = 0; k < N; k++){ const h = 0.3 + k * rise, m = new THREE.Mesh(roundedBox(0.8, h, 0.8, 0.03, 6, 2), stone); posOf(k, m.position); m.position.y = -1 + h / 2; G.add(m); }
+      const walker = sprite(novaCoreTex, HC(2.4, 2.0, 1.2)); walker.scale.setScalar(0.5); G.add(walker);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.rotateX(0.75); G.visible = true; },
+        update(lt, raw, t){
+          const k = lt * 2.2, k0 = Math.floor(k), f = k - k0;
+          posOf(k0, _mp); posOf(k0 + 1, _ms); walker.position.lerpVectors(_mp, _ms, f);
+          walker.position.y = lerp(topOf(k0), topOf(k0 + 1), f) + 0.25 + 0.12 * Math.sin(f * Math.PI);
+          G.rotateY(raw * 0.25); G.scale.setScalar(Math.max(0.001, env(lt, 9.5, 0.8, 1.0)));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Planeta bebé', line: 'El polvo se junta y nace un mundo diminuto.', dur: 9.5, make(P){
+      const G = newGroup(), N = 420, dust = pointsOf(N, 0.09, HC(2.2, 1.4, 0.8)); G.add(dust.p);
+      const seeds = []; for (let i = 0; i < N; i++) seeds.push({ r: 1 + Math.random() * 3.2, a: Math.random() * 6.28, y: (Math.random() - 0.5) * 0.8 });
+      const planet = new THREE.Mesh(new THREE.SphereGeometry(0.6, 48, 32), new THREE.MeshStandardMaterial({ color: C('#9a6a4a'), map: TX.rockColor, normalMap: TX.rockNormal, roughness: 0.9, emissive: C('#ff5a1a'), emissiveMap: TX.rockColor, emissiveIntensity: 3 }));
+      G.add(planet);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.4, 96, 1), addMat(HC(1.4, 1.1, 0.8))); ring.rotation.x = 1.25; G.add(ring);
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      return {
+        start(){ a.copy(P.anchor); at(P, 4, 2.5, 6, b); G.position.copy(a); faceCam(G); G.rotateX(0.5); G.visible = true; },
+        update(lt, raw, t){
+          const pull = easeIO(smooth(0.3, 4.0, lt));
+          seeds.forEach((s, i) => { s.a += raw * (0.6 + 2.0 / s.r); const r = s.r * (1 - pull * 0.95); dust.pos.set([Math.cos(s.a) * r, s.y * (1 - pull), Math.sin(s.a) * r], i * 3); });
+          dust.flush(); dust.mat.opacity = 1 - smooth(3.5, 4.5, lt);
+          planet.scale.setScalar(Math.max(0.001, easeIO(smooth(2.8, 4.6, lt)))); planet.rotation.y += raw * 0.8;
+          planet.material.emissiveIntensity = 3 * (1 - smooth(4.5, 7.5, lt)) + 0.15;   // the molten crust cools down
+          const rk = smooth(4.8, 6.0, lt); ring.scale.setScalar(Math.max(0.001, rk)); ring.material.opacity = 0.7 * rk;
+          const go = easeIO(smooth(6.8, 9.5, lt)); G.position.lerpVectors(a, b, go); G.scale.setScalar(Math.max(0.001, 1 - go * 0.7));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Cometa', line: 'Un cometa cruza la garganta del túnel con su cola de colores.', dur: 6.5, make(P){
+      const nucleus = new THREE.Mesh(rockGeos[3], rockMats[1]); nucleus.scale.setScalar(0.22); nucleus.visible = false; scene.add(nucleus);
+      const coma = glow(HC(1.6, 2.2, 2.6), 2.2); coma.visible = false; scene.add(coma);
+      const ion = pointsOf(90, 0.2, HC(0.6, 1.4, 2.6)), dustT = pointsOf(90, 0.24, HC(2.4, 1.6, 0.8)); ion.p.visible = dustT.p.visible = false; scene.add(ion.p, dustT.p);
+      const a = new THREE.Vector3(), b = new THREE.Vector3(), dir = new THREE.Vector3(), anti = new THREE.Vector3();
+      const jit = []; for (let i = 0; i < 90; i++) jit.push([Math.random() - 0.5, Math.random() - 0.5]);
+      return {
+        start(){ at(P, -7, 3, 1, a); at(P, 7, -2.5, -1, b); dir.subVectors(b, a).normalize(); anti.copy(dir).negate().add(V(0, 0, 0.6)).normalize(); nucleus.visible = coma.visible = ion.p.visible = dustT.p.visible = true; },
+        update(lt, raw, t){
+          const n = nucleus.position; n.lerpVectors(a, b, lt / 6.5); coma.position.copy(n); nucleus.rotation.x += raw * 2;
+          for (let i = 0; i < 90; i++){
+            const d = i * 0.06, sp = i * 0.004;
+            ion.pos.set([n.x + anti.x * d + jit[i][0] * sp, n.y + anti.y * d + jit[i][1] * sp, n.z + anti.z * d], i * 3);   // straight blue ion tail
+            const dd = i * 0.05, sp2 = i * 0.003;
+            dustT.pos.set([n.x - dir.x * dd + jit[i][0] * sp2, n.y - dir.y * dd + i * i * 0.0002 + jit[i][1] * sp2, n.z - dir.z * dd], i * 3);   // curved warm dust tail
+          }
+          ion.flush(); dustT.flush();
+          const e = env(lt, 6.5, 0.5, 0.8); ion.mat.opacity = dustT.mat.opacity = coma.material.opacity = e;
+        },
+        end(){ nucleus.visible = coma.visible = ion.p.visible = dustT.p.visible = false; }
+      };
+    } },
+    { name: 'Lluvia de meteoros', line: 'Una lluvia de estrellas fugaces del tamaño de tu casco.', dur: 7.5, make(P){
+      const N = 50, segs = segsOf(N, HC(2.2, 2.0, 1.6)), heads = pointsOf(N, 0.16, HC(2.6, 2.4, 2.0)); segs.l.visible = heads.p.visible = false; scene.add(segs.l, heads.p);
+      const m = [];
+      const respawn = (s, lt) => { s.t0 = lt + Math.random() * 0.6; s.x = (Math.random() - 0.5) * 6; s.y = 2.5 + Math.random() * 1.5; s.d = (Math.random() - 0.5) * 2; s.v = 5 + Math.random() * 4; };
+      for (let i = 0; i < N; i++){ const s = {}; respawn(s, 0); m.push(s); }
+      return {
+        start(){ segs.l.visible = heads.p.visible = true; m.forEach((s) => respawn(s, Math.random() * 1.5)); },
+        update(lt, raw, t){
+          m.forEach((s, i) => {
+            if (lt - s.t0 > 0.9) respawn(s, lt);
+            const age = lt - s.t0, live = age > 0 && lt < 6.8, d = Math.max(0, age) * s.v * 0.5;
+            if (live){ at(P, s.x + 0.55 * d, s.y - d, s.d, _mp); at(P, s.x + 0.55 * (d - 0.35), s.y - (d - 0.35), s.d, _ms); } else { _mp.set(0, 1e4, 0); _ms.copy(_mp); }
+            segs.pos.set([_ms.x, _ms.y, _ms.z, _mp.x, _mp.y, _mp.z], i * 6); heads.pos.set([_mp.x, _mp.y, _mp.z], i * 3);
+          });
+          segs.flush(); heads.flush(); segs.mat.opacity = heads.mat.opacity = env(lt, 7.5, 0.4, 0.8);
+        },
+        end(){ segs.l.visible = heads.p.visible = false; }
+      };
+    } },
+    { name: 'Lluvia hacia arriba', line: 'Gotas de luz que caen… hacia arriba.', dur: 8, make(P){
+      const N = 140, segs = segsOf(N, HC(0.7, 1.4, 2.6)); segs.l.visible = false; scene.add(segs.l);
+      const splash = []; for (let i = 0; i < 10; i++){ const s = sprite(novaRingTex, HC(0.6, 1.4, 2.4)); s.visible = false; scene.add(s); splash.push({ s, t0: -9, x: 0, d: 0 }); }
+      const drops = []; for (let i = 0; i < N; i++) drops.push({ x: (Math.random() - 0.5) * 7, d: (Math.random() - 0.5) * 3, ph: Math.random() * 6, v: 2.2 + Math.random() * 1.2, prev: 0 });
+      let si = 0;
+      return {
+        start(){ segs.l.visible = true; splash.forEach((p) => { p.s.visible = true; p.t0 = -9; }); },
+        update(lt, raw, t){
+          const e = env(lt, 8, 0.8, 1.0);
+          drops.forEach((q, i) => {
+            const y = -3 + ((lt * q.v + q.ph) % 6);
+            if (y < q.prev){ const p = splash[si++ % splash.length]; if (lt - p.t0 > 0.6){ p.t0 = lt; p.x = q.x; p.d = q.d; } }   // it reached the top: a ripple
+            q.prev = y;
+            at(P, q.x, y, q.d, _mp); at(P, q.x, y - 0.3, q.d, _ms); segs.pos.set([_ms.x, _ms.y, _ms.z, _mp.x, _mp.y, _mp.z], i * 6);
+          });
+          segs.flush(); segs.mat.opacity = 0.8 * e;
+          splash.forEach((p) => { const k = (lt - p.t0) / 0.6; if (k < 0 || k > 1){ p.s.material.opacity = 0; return; } at(P, p.x, 3, p.d, p.s.position); p.s.scale.setScalar(0.2 + 0.8 * k); p.s.material.opacity = (1 - k) * e; });
+        },
+        end(){ segs.l.visible = false; splash.forEach((p) => { p.s.visible = false; }); }
+      };
+    } }
+  ];
+
+  /* ===== group 5 · signals ===== */
+  const SIGNALS = [
+    { name: 'Grieta a la Tierra', line: 'Por una grieta se ve Bogotá de noche, con Monserrate encendido.', dur: 9.5, make(P){
+      const G = newGroup(), W = 768, H = 512, city = makeCanvas(W, H), cg = city.getContext('2d');
+      { const sky = cg.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#060a1c'); sky.addColorStop(0.55, '#1b2350'); sky.addColorStop(0.75, '#3a2a4a'); cg.fillStyle = sky; cg.fillRect(0, 0, W, H);
+        for (let i = 0; i < 120; i++){ cg.fillStyle = 'rgba(255,255,255,' + (0.3 + Math.random() * 0.6) + ')'; cg.fillRect(Math.random() * W, Math.random() * H * 0.4, 1.5, 1.5); }
+        // the eastern hills, Monserrate the highest, with its white church lit on top and the cable car line
+        cg.fillStyle = '#0a0d16'; cg.beginPath(); cg.moveTo(0, 300); cg.lineTo(90, 250); cg.lineTo(170, 215); cg.lineTo(250, 160); cg.lineTo(300, 150); cg.lineTo(360, 190); cg.lineTo(450, 175); cg.lineTo(540, 215); cg.lineTo(650, 230); cg.lineTo(W, 260); cg.lineTo(W, H); cg.lineTo(0, H); cg.fill();
+        cg.fillStyle = '#fff6dc'; cg.shadowColor = '#ffe9a8'; cg.shadowBlur = 14; cg.fillRect(268, 138, 22, 12); cg.fillRect(276, 126, 6, 12); cg.shadowBlur = 0;
+        cg.strokeStyle = 'rgba(255,220,150,0.6)'; cg.lineWidth = 1.5; cg.setLineDash([3, 5]); cg.beginPath(); cg.moveTo(279, 152); cg.lineTo(200, 300); cg.stroke(); cg.setLineDash([]);
+        // the city spread over the savanna: warm lights denser toward the viewer, a few avenues
+        for (let i = 0; i < 2600; i++){ const y = 300 + Math.pow(Math.random(), 0.7) * (H - 300), s = 0.8 + (y - 300) / 160; cg.fillStyle = Math.random() < 0.82 ? 'rgba(255,190,110,' + (0.5 + Math.random() * 0.5) + ')' : 'rgba(200,230,255,0.85)'; cg.fillRect(Math.random() * W, y, s, s); }
+        cg.strokeStyle = 'rgba(255,170,80,0.75)'; cg.lineWidth = 2; for (let k = 0; k < 6; k++){ cg.beginPath(); cg.moveTo(Math.random() * W, H); cg.lineTo(330 + (Math.random() - 0.5) * 200, 300); cg.stroke(); }
+        cg.fillStyle = '#ff3a2a'; [[520, 270], [560, 262], [600, 280]].forEach(([x, y]) => { cg.fillRect(x, y, 3, 3); });
+      }
+      const L = liveTex(W, H);
+      G.add(new THREE.Mesh(new THREE.PlaneGeometry(6, 4), new THREE.MeshBasicMaterial({ map: L.tx, fog: false, transparent: true, depthWrite: false, side: THREE.DoubleSide })));
+      let crack = [];
+      const widthAt = (i, y, w) => w * (110 + 60 * Math.sin(i * 1.7)) * Math.sin(Math.PI * THREE.MathUtils.clamp(y / H, 0.05, 0.95));
+      function draw(w){
+        const g = L.g; g.clearRect(0, 0, W, H);
+        if (w > 0.001){
+          g.save(); g.beginPath();
+          crack.forEach(([x, y], i) => { const ww = widthAt(i, y, w); if (i) g.lineTo(x - ww, y); else g.moveTo(x - ww, y); });
+          for (let i = crack.length - 1; i >= 0; i--){ const [x, y] = crack[i]; g.lineTo(x + widthAt(i, y, w) * 0.8, y); }
+          g.closePath();
+          g.save(); g.clip(); g.drawImage(city, 0, 0); g.restore();
+          g.strokeStyle = '#fff1d6'; g.shadowColor = '#ffb46a'; g.shadowBlur = 22; g.lineWidth = 4; g.stroke(); g.restore();
+        }
+        L.tx.needsUpdate = true;
+      }
+      let acc = 0;
+      return {
+        start(){ crack = []; for (let y = -20; y < H + 20; y += 30 + Math.random() * 40) crack.push([W / 2 + (Math.random() - 0.5) * 90, y]); G.position.copy(P.anchor); faceCam(G); G.visible = true; draw(0); },
+        update(lt, raw, t){ const w = easeIO(smooth(0.4, 2.5, lt)) * (1 - easeIO(smooth(7.0, 9.0, lt))); acc += raw; if (acc > 1 / 30){ acc = 0; draw(w); } momentFx.ca += 0.02 * smooth(0.4, 0.8, lt) * (1 - smooth(0.8, 1.6, lt)); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Mensaje en las estrellas', line: 'Las estrellas se ordenan para saludarte: «HOLA».', dur: 9, make(P){
+      const G = newGroup(), T1 = textStars('HOLA', 6, HC(2.2, 2.2, 2.6)); G.add(T1.stars.p);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){ T1.update(smooth(0.5, 3.0, lt) * (1 - smooth(6.5, 8.5, lt)), t, env(lt, 9, 0.5, 0.6)); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Coro de orbes', line: 'Siete esferas cantan una melodía de luz.', dur: 9, make(P){
+      const G = newGroup(), orbs = [], melody = [0, 2, 4, 5, 4, 2, 0, 6, 4, 2, 1, 0];
+      const baseY = (i) => Math.cos((i / 6 - 0.5) * 2.2) * 3 - 2.2;
+      for (let i = 0; i < 7; i++){
+        const c = new THREE.Color().setHSL(i / 7, 0.9, 0.55), x = Math.sin((i / 6 - 0.5) * 2.2) * 3;
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.28, 24, 16), lit(c.clone())); m.position.set(x, baseY(i), 0); G.add(m);
+        const h = sprite(dotTex, c.clone()); h.position.copy(m.position); G.add(h);
+        const r = sprite(novaRingTex, c.clone().multiplyScalar(1.6)); r.position.copy(m.position); G.add(r);
+        orbs.push({ m, h, r, c, hit: -9 });
+      }
+      let lastBeat = -1;
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; lastBeat = -1; orbs.forEach((o) => { o.hit = -9; }); },
+        update(lt, raw, t){
+          const e = env(lt, 9, 0.6, 1.0), beat = Math.floor((lt - 0.8) / 0.45);
+          if (beat >= 0 && beat !== lastBeat){ lastBeat = beat; if (beat < melody.length) orbs[melody[beat]].hit = lt; else if (beat === melody.length + 1) orbs.forEach((o) => { o.hit = lt; }); }   // the melody, then a chord
+          orbs.forEach((o, i) => {
+            const k = Math.max(0, 1 - (lt - o.hit) / 0.6), rk = Math.min(1, (lt - o.hit) / 0.8);
+            o.m.material.color.copy(o.c).multiplyScalar(0.5 + 3 * k); o.h.scale.setScalar((0.8 + 2.2 * k) * e); o.h.material.opacity = (0.3 + 0.7 * k) * e;
+            o.r.scale.setScalar(0.6 + 2.5 * rk); o.r.material.opacity = (1 - rk) * e;
+            o.m.position.y = o.h.position.y = o.r.position.y = baseY(i) + 0.08 * Math.sin(t * 2 + i);
+          });
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Huellas en la nada', line: 'Alguien caminó por aquí… donde no hay suelo.', dur: 9, make(P){
+      const G = newGroup();
+      const boot = texOf(128, 256, (g) => { g.fillStyle = '#bff6ff'; g.shadowColor = '#5ce1ff'; g.shadowBlur = 14; g.beginPath(); g.ellipse(64, 80, 40, 62, 0, 0, Math.PI * 2); g.fill(); g.beginPath(); g.ellipse(64, 200, 32, 40, 0, 0, Math.PI * 2); g.fill(); g.globalCompositeOperation = 'destination-out'; for (let y = 40; y < 240; y += 22) g.fillRect(20, y, 88, 7); });
+      const steps = [];
+      for (let i = 0; i < 14; i++){
+        const side = i % 2 ? 1 : -1, m = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.84), addMat(HC(1.4, 1.8, 2.2), boot));
+        m.position.set(-3.2 + i * 0.5, Math.sin(i * 0.5) * 0.8 + side * 0.22, 0); m.rotation.z = -Math.PI / 2 + Math.atan(0.8 * Math.cos(i * 0.5));
+        G.add(m); steps.push(m);
+      }
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.rotateX(-0.9); G.visible = true; },
+        update(lt, raw, t){ steps.forEach((m, i) => { const ti = 0.6 + i * 0.45; m.material.opacity = smooth(ti, ti + 0.15, lt) * (1 - smooth(ti + 2.5, ti + 4.0, lt)); }); },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Duplicado de la nave', line: 'Aparecen dos naves idénticas. ¿Cuál es la real?', dur: 9, make(P){
+      const { c: twin } = cloneClean(ship); twin.visible = false; scene.add(twin);
+      const a = new THREE.Vector3();
+      return {
+        start(){ at(P, 0, 0, 3, a); twin.visible = true; },
+        update(lt, raw, t){
+          twin.position.copy(a).addScaledVector(P.right, 1.5 * Math.sin(lt * 0.6)).addScaledVector(P.up, 0.5 * Math.sin(lt * 0.9));
+          twin.rotation.set(-0.42 + 0.05 * Math.sin(t * 0.13), 0.35 + 0.3 * Math.sin(lt * 0.5), 0.3 + 0.12 * Math.sin(t * 0.1));
+          const glitch = lt > 6.5 && !reduceMotion ? (Math.sin(t * 47) > 0 ? 1 : 0) : 0;
+          twin.scale.setScalar(0.55 * Math.max(0.001, env(lt, 9, 1.0, 1.4)) * (1 + 0.15 * glitch));
+          momentFx.ca += 0.03 * glitch;
+        },
+        end(){ twin.visible = false; }
+      };
+    } },
+    { name: 'Señal de radio', line: 'Una transmisión desconocida late desde el fondo del túnel.', dur: 9, make(P){
+      const G = newGroup(), src = sprite(novaCoreTex, HC(2.4, 1.2, 2.4)); src.scale.setScalar(1.2); G.add(src);
+      const waves = []; for (let i = 0; i < 6; i++){ const r = sprite(novaRingTex, HC(1.6, 0.8, 2.2)); G.add(r); waves.push(r); }
+      const N = 160, wgeo = new THREE.BufferGeometry(); wgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+      const wave = new THREE.Line(wgeo, new THREE.LineBasicMaterial({ color: HC(1.4, 2.2, 1.6), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })); wave.frustumCulled = false; G.add(wave);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9, 0.6, 1.0);
+          waves.forEach((r, i) => { const k = (lt * 0.5 + i / 6) % 1; r.scale.setScalar(0.5 + 7 * k); r.material.opacity = (1 - k) * e * 0.8; });
+          const arr = wgeo.attributes.position.array;
+          for (let i = 0; i < N; i++){ const x = -3 + i / (N - 1) * 6, burst = Math.max(0, Math.sin(x * 1.2 - lt * 3)); arr[i * 3] = x; arr[i * 3 + 1] = -2.2 + Math.sin(x * 9 - lt * 12) * 0.35 * burst * burst; arr[i * 3 + 2] = 0; }
+          wgeo.attributes.position.needsUpdate = true; wave.material.opacity = e;
+          src.material.opacity = e * (0.6 + 0.4 * Math.max(0, Math.sin(lt * 6)));
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Laberinto de luz', line: 'Un laberinto se dibuja solo… y algo lo resuelve.', dur: 10, make(P){
+      const G = newGroup(), n = 9, size = 4.4, cell = size / n, MAXW = 2 * n * (n + 1), walls = segsOf(MAXW, HC(0.6, 1.6, 2.4)); G.add(walls.l);
+      const runner = sprite(novaCoreTex, HC(2.4, 1.6, 0.6)); runner.scale.setScalar(0.5); G.add(runner);
+      let wallList = [], route = [];
+      function build(){
+        const seen = new Uint8Array(n * n), right = new Uint8Array(n * n).fill(1), down = new Uint8Array(n * n).fill(1), prev = new Int32Array(n * n).fill(-1), stack = [0];
+        seen[0] = 1;
+        while (stack.length){   // depth-first maze carving
+          const c = stack[stack.length - 1], x = c % n, y = (c / n) | 0, nb = [];
+          if (x > 0 && !seen[c - 1]) nb.push(c - 1); if (x < n - 1 && !seen[c + 1]) nb.push(c + 1);
+          if (y > 0 && !seen[c - n]) nb.push(c - n); if (y < n - 1 && !seen[c + n]) nb.push(c + n);
+          if (!nb.length){ stack.pop(); continue; }
+          const k = nb[(Math.random() * nb.length) | 0];
+          if (k === c + 1) right[c] = 0; else if (k === c - 1) right[k] = 0; else if (k === c + n) down[c] = 0; else down[k] = 0;
+          seen[k] = 1; prev[k] = c; stack.push(k);
+        }
+        const X = (i) => -size / 2 + i * cell, Y = (j) => size / 2 - j * cell;
+        wallList = [[X(0), Y(0), X(n), Y(0)], [X(0), Y(0), X(0), Y(n)]];
+        for (let c = 0; c < n * n; c++){ const x = c % n, y = (c / n) | 0; if (right[c] && c !== n * n - 1) wallList.push([X(x + 1), Y(y), X(x + 1), Y(y + 1)]); if (down[c]) wallList.push([X(x), Y(y + 1), X(x + 1), Y(y + 1)]); }
+        shuffle(wallList);   // the walls appear in random order
+        route = []; for (let c = n * n - 1; c !== -1; c = prev[c]) route.unshift([X(c % n) + cell / 2, Y((c / n) | 0) - cell / 2]);
+      }
+      return {
+        start(){ build(); G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 10, 0.4, 1.0), show = Math.floor(smooth(0.3, 3.5, lt) * wallList.length);
+          for (let i = 0; i < MAXW; i++){ const w = i < show ? wallList[i] : null; walls.pos.set(w ? [w[0], w[1], 0, w[2], w[3], 0] : [0, 0, 1e4, 0, 0, 1e4], i * 6); }
+          walls.flush(); walls.mat.opacity = e;
+          const rk = smooth(3.8, 8.5, lt) * (route.length - 1), i0 = Math.floor(rk), f = rk - i0, p0 = route[Math.min(i0, route.length - 1)], p1 = route[Math.min(i0 + 1, route.length - 1)];
+          runner.position.set(lerp(p0[0], p1[0], f), lerp(p0[1], p1[1], f), 0.05); runner.material.opacity = e * smooth(3.5, 3.9, lt);
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Concierto de púlsares', line: 'Cinco estrellas laten al ritmo de un corazón.', dur: 9, make(P){
+      const G = newGroup(), stars = [];
+      for (let i = 0; i < 5; i++){
+        const g = new THREE.Group(), a = i / 5 * Math.PI * 2; g.position.set(Math.cos(a) * 2.4, Math.sin(a) * 2.0, (Math.random() - 0.5) * 1.5); G.add(g);
+        const core = sprite(novaCoreTex, HC(1.8, 1.9, 2.6)); g.add(core);
+        const beams = new THREE.Group(); beams.rotation.x = 0.6; g.add(beams);
+        for (const s of [0, Math.PI]){ const geo = new THREE.ConeGeometry(0.18, 2.6, 16, 1, true); geo.translate(0, -1.3, 0); const cn = new THREE.Mesh(geo, addMat(HC(0.4, 0.6, 1.2))); cn.rotation.z = s; beams.add(cn); }
+        stars.push({ core, beams, sp: 1.5 + i * 0.4 });
+      }
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9, 0.6, 1.0), bt = (lt % 0.83) / 0.83;   // 72 beats per minute
+          const lub = Math.exp(-bt * 30) + (bt > 0.18 ? 0.7 * Math.exp(-(bt - 0.18) * 30) : 0);   // lub… dub
+          stars.forEach((s) => { s.beams.rotation.z += raw * s.sp; s.core.scale.setScalar((0.8 + 2.0 * lub) * e); s.core.material.opacity = (0.4 + 0.6 * lub) * e; s.beams.children.forEach((c) => { c.material.opacity = (0.3 + 0.7 * lub) * e; }); });
+          momentFx.ca += 0.008 * lub * e;
+        },
+        end(){ G.visible = false; }
+      };
+    } },
+    { name: 'Estás aquí', line: 'Las estrellas escriben tu lugar en el cosmos: «Estás aquí».', dur: 9, make(P){
+      const G = newGroup(), T1 = textStars('ESTÁS AQUÍ', 7, HC(2.4, 2.0, 1.2)); G.add(T1.stars.p);
+      const arrow = segsOf(3, HC(2.4, 2.0, 1.2)); arrow.l.visible = false; scene.add(arrow.l);
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = arrow.l.visible = true; },
+        update(lt, raw, t){
+          const e = env(lt, 9, 0.5, 0.6); T1.update(smooth(0.5, 3.0, lt) * (1 - smooth(6.8, 8.6, lt)), t, e);
+          // a line drawn from the words down to the astronaut, with an arrowhead
+          const ak = smooth(3.0, 4.5, lt); at(P, 0, -1.0, 0, _mp); _ms.lerpVectors(_mp, astro.position, 0.85 * ak);
+          _mv.subVectors(_mp, _ms).normalize().multiplyScalar(0.4); _mto.crossVectors(_mv, P.out).normalize().multiplyScalar(0.25);
+          arrow.pos.set([_mp.x, _mp.y, _mp.z, _ms.x, _ms.y, _ms.z,
+            _ms.x, _ms.y, _ms.z, _ms.x + _mv.x + _mto.x, _ms.y + _mv.y + _mto.y, _ms.z + _mv.z + _mto.z,
+            _ms.x, _ms.y, _ms.z, _ms.x + _mv.x - _mto.x, _ms.y + _mv.y - _mto.y, _ms.z + _mv.z - _mto.z]);
+          arrow.flush(); arrow.mat.opacity = ak * e;
+        },
+        end(){ G.visible = arrow.l.visible = false; }
+      };
+    } },
+    { name: 'Salida del agujero', line: 'Por un segundo se ve el otro lado del puente.', dur: 8.5, make(P){
+      const G = newGroup();
+      const other = texOf(512, 512, (g) => {
+        const sky = g.createRadialGradient(256, 300, 20, 256, 256, 360); sky.addColorStop(0, '#9fe8ff'); sky.addColorStop(0.5, '#2b6fb3'); sky.addColorStop(1, '#0b1b3a'); g.fillStyle = sky; g.fillRect(0, 0, 512, 512);
+        for (let i = 0; i < 200; i++){ g.fillStyle = 'rgba(255,255,255,' + Math.random() + ')'; g.fillRect(Math.random() * 512, Math.random() * 512, 1.5, 1.5); }
+        const pl = g.createRadialGradient(220, 230, 10, 256, 256, 110); pl.addColorStop(0, '#ffe7c2'); pl.addColorStop(0.6, '#d9885a'); pl.addColorStop(1, '#5a2e3a'); g.fillStyle = pl; g.beginPath(); g.arc(256, 260, 100, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = 'rgba(255,230,200,0.75)'; g.lineWidth = 6; g.beginPath(); g.ellipse(256, 262, 180, 40, -0.25, 0, Math.PI * 2); g.stroke();
+        g.globalCompositeOperation = 'destination-in'; const m = g.createRadialGradient(256, 256, 210, 256, 256, 256); m.addColorStop(0, '#000'); m.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = m; g.fillRect(0, 0, 512, 512);
+      });
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(2.0, 64), new THREE.MeshBasicMaterial({ map: other, transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide })); G.add(disc);
+      G.add(new THREE.Mesh(new THREE.TorusGeometry(2.02, 0.07, 10, 96), lit(HC(3, 3, 3))));
+      const rays = new THREE.Group(); G.add(rays);
+      for (let i = 0; i < 14; i++){ const geo = new THREE.PlaneGeometry(0.12, 6); geo.translate(0, 5.1, 0); const r = new THREE.Mesh(geo, addMat(HC(1.6, 1.8, 2.0))); r.rotation.z = i / 14 * Math.PI * 2; rays.add(r); }
+      return {
+        start(){ G.position.copy(P.anchor); faceCam(G); G.visible = true; },
+        update(lt, raw, t){
+          const open = easeIO(smooth(0.6, 2.2, lt)) * (1 - easeIO(smooth(6.4, 8.2, lt)));
+          G.scale.setScalar(Math.max(0.001, open)); disc.material.opacity = open; rays.rotateZ(raw * 0.2);
+          rays.children.forEach((r, i) => { r.material.opacity = open * (0.25 + 0.2 * Math.sin(t * 3 + i)); });
+          const fl = smooth(0.6, 0.9, lt) * (1 - smooth(0.9, 2.0, lt)); momentFx.dim -= 0.6 * fl; momentFx.ca += 0.03 * fl;   // a flash of light from the other side
+        },
+        end(){ G.visible = false; }
+      };
+    } }
+  ];
+
+  /* ===== the five activation points ===== */
+  const LIFT = THREE.MathUtils.degToRad(12);   // how far above the centre of the view the events appear
+  const points = [
+    { theta: Math.PI, phi: 1.0, dist: 6, color: HC(0.5, 1.4, 2.0), defs: TIME },          // behind, low
+    { theta: 1.75, phi: 1.75, dist: 10, color: HC(2.0, 0.5, 1.6), defs: CREATURES },      // left, a little up
+    { theta: -1.5, phi: 1.7, dist: 7, color: HC(0.6, 2.2, 1.2), defs: VISITORS },         // right
+    { theta: -0.9, phi: 0.7, dist: 8, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },          // down and to the right
+    { theta: 0.75, phi: 2.1, dist: 9, color: HC(1.6, 1.6, 2.4), defs: SIGNALS }           // up and to the left
+  ].map((d) => {
+    const out = viewDir(d.theta, d.phi), right = new THREE.Vector3().crossVectors(out, V(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, out).normalize();
+    // the events sit a little above the astronaut, so the astronaut never hides them
+    const anchor = MT.clone().addScaledVector(out, d.dist).addScaledVector(up, (d.dist + 4.15) * Math.tan(LIFT)), glint = sprite(novaCoreTex, d.color);
+    glint.position.copy(anchor); scene.add(glint);
+    return { anchor, out, right, up, defs: d.defs, bag: [], last: -1, glint, glint0: 0.11 * (d.dist + 4), state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
+  });
+  function nextIndex(p){
+    if (!p.bag.length){
+      p.bag = shuffle(p.defs.map((_, i) => i));
+      const n = p.bag.length; if (n > 1 && p.bag[n - 1] === p.last){ const x = p.bag[0]; p.bag[0] = p.bag[n - 1]; p.bag[n - 1] = x; }   // never the same twice in a row
+    }
+    return p.bag.pop();
+  }
+  let toastTimer = 0, toastHide = 0;
+  function toast(def){
     const el = MUI.toast; if (!el) return;
-    el.querySelector('strong').textContent = m.name;
-    el.querySelector('span').textContent = m.line + (fresh && found === moments.length ? ' Encontraste los 4 momentos.' : '');
+    el.querySelector('strong').textContent = def.name; el.querySelector('span').textContent = def.line;
     el.hidden = false; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
     clearTimeout(toastTimer); clearTimeout(toastHide);
     toastTimer = setTimeout(() => { el.classList.remove('show'); toastHide = setTimeout(() => { el.hidden = true; }, 400); }, 4500);
   }
-  function startMoment(m){ m.state = 'on'; m.time = 0; m.dwell = 0; m.glint.visible = false; m.start(); announce(m); }
-  const GAZE = Math.cos(THREE.MathUtils.degToRad(12)), DWELL = 0.5, REST = 6;
+  function playPoint(p, idx){
+    const i = idx == null ? nextIndex(p) : idx, def = p.defs[i];
+    p.last = i;
+    try { if (!def.inst) def.inst = def.make(p, def); def.inst.start(); }
+    catch (err){ console.error(err); p.state = 'spent'; p.glint.visible = false; return; }
+    p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false;
+    points.forEach((q) => { if (q !== p && q.state === 'spent') q.state = 'idle'; });   // activating a point brings the spent ones back
+    toast(def);
+  }
+  const GAZE = Math.cos(THREE.MathUtils.degToRad(12)), DWELL = 0.5;
   function updateMoments(raw, t){
-    if (echoRecord) echoRecord(performance.now() / 1000);
-    momentFx.ca = 0; momentFx.lensK = 0;
-    camera.updateMatrixWorld();
-    camera.getWorldDirection(_mf);
-    for (const m of moments){
-      if (m.state === 'on'){
-        m.time += raw; m.update(m.time, raw, t);
-        if (m.time >= m.dur){ m.state = 'rest'; m.time = 0; m.end(); }
+    recordPose(performance.now() / 1000);
+    momentFx.ca = 0; momentFx.lensK = 0; momentFx.freeze = 0; momentFx.tintA = 0; momentFx.dim = 0;
+    camera.updateMatrixWorld(); camera.getWorldDirection(_mf);
+    _mv.set(0, 1, 0).applyQuaternion(camera.quaternion); _mf.multiplyScalar(Math.cos(LIFT)).addScaledVector(_mv, Math.sin(LIFT)).normalize();   // the sweet spot, just above the astronaut
+    for (const p of points){
+      if (p.state === 'on'){
+        p.time += raw;
+        try { p.cur.inst.update(p.time, raw, t); } catch (err){ console.error(err); p.time = p.cur.dur; }
+        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; }
         continue;
       }
-      if (m.state === 'rest'){ m.time += raw; if (m.time >= REST){ m.state = 'idle'; m.dwell = 0; } }
-      const s = _mto.copy(m.anchor).sub(camera.position).normalize().dot(_mf);
-      const near = smooth(GAZE - 0.08, GAZE, s);
-      if (m.state === 'idle'){
-        m.dwell = s > GAZE ? m.dwell + raw : Math.max(0, m.dwell - raw * 2);
-        if (m.dwell >= DWELL){ startMoment(m); continue; }
-      }
-      const g = m.glint; g.visible = m.state === 'idle';
-      if (g.visible){
-        const pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + m.ph);
-        g.material.opacity = Math.min(1, (m.found ? 0.2 : 0.4) + 0.3 * pulse + 0.5 * near);
-        g.scale.setScalar(m.glint0 * (0.7 + 0.3 * pulse + 0.8 * near + 1.4 * m.dwell / DWELL));
-      }
+      if (p.state === 'spent'){ p.glint.visible = false; continue; }
+      const s = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf), near = smooth(GAZE - 0.08, GAZE, s);
+      p.dwell = s > GAZE ? p.dwell + raw : Math.max(0, p.dwell - raw * 2);
+      if (p.dwell >= DWELL){ playPoint(p); continue; }
+      const g = p.glint, pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + p.ph);
+      g.visible = true;
+      g.material.opacity = Math.min(1, 0.4 + 0.3 * pulse + 0.5 * near);
+      g.scale.setScalar(p.glint0 * (0.7 + 0.3 * pulse + 0.8 * near + 1.4 * p.dwell / DWELL));
     }
   }
-  if (/debug/.test(location.hash)) window.__momentos = { start: (i) => startMoment(moments[i]), list: moments };
+  if (/debug/.test(location.hash)) window.__momentos = {
+    play: (pi, si) => playPoint(points[pi], si),
+    look(pi){ setCine(false); camera.position.copy(MT).addScaledVector(points[pi].out, -4.15); camera.lookAt(MT); },
+    points
+  };
 
   /* ---------- lights ---------- */
   const rim = new THREE.DirectionalLight(C('#ffe4cf'), 1.0); rim.position.set(0.3, -0.8, -6); rim.target = astro; scene.add(rim);
@@ -1572,10 +2674,10 @@ function init(){
     [bloom.renderTargetBright].concat(bloom.renderTargetsHorizontal || [], bloom.renderTargetsVertical || []).forEach((t) => { if (t && t.texture) t.texture.type = HDR; });
     composer.addPass(bloom);
     finalPass = new THREE.ShaderPass({
-      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2(0.001, 0.001) }, uExposure: { value: 0.95 }, uCA: { value: 0.004 }, uSpeed: { value: 1 }, uSharp: { value: 0.22 }, uLensPos: { value: new THREE.Vector2(0.5, 0.5) }, uLensR: { value: 0 }, uLensK: { value: 0 } },
+      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uTexel: { value: new THREE.Vector2(0.001, 0.001) }, uExposure: { value: 0.95 }, uCA: { value: 0.004 }, uSpeed: { value: 1 }, uSharp: { value: 0.22 }, uLensPos: { value: new THREE.Vector2(0.5, 0.5) }, uLensR: { value: 0 }, uLensK: { value: 0 }, uFreeze: { value: 0 }, uTintA: { value: 0 }, uTintC: { value: new THREE.Color(1, 1, 1) } },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: `
-        uniform sampler2D tDiffuse; uniform float uTime, uExposure, uCA, uSpeed, uSharp, uLensR, uLensK; uniform vec2 uRes, uTexel, uLensPos;
+        uniform sampler2D tDiffuse; uniform float uTime, uExposure, uCA, uSpeed, uSharp, uLensR, uLensK, uFreeze, uTintA; uniform vec2 uRes, uTexel, uLensPos; uniform vec3 uTintC;
         varying vec2 vUv;
         float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
         vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
@@ -1604,6 +2706,8 @@ function init(){
                   + aces(texture2D(tDiffuse, uv - vec2(0.0, uTexel.y)).rgb * uExposure);
           col = clamp(col + (col * 4.0 - nb) * uSharp, 0.0, 1.0);
           float vig = 1.0 - smoothstep(0.35, 1.15, length(ca) * 1.15);
+          if (uFreeze > 0.0){ float lum = dot(col, vec3(0.299, 0.587, 0.114)); col = mix(col, vec3(lum * 0.78, lum * 0.95, lum * 1.2), uFreeze * 0.85); }
+          col = mix(col, clamp(col * uTintC * 1.5, 0.0, 1.0), uTintA);
           col *= mix(0.42, 1.0, vig);
           if (uLensK > 0.0){ col *= hole; col += vec3(1.0, 0.85, 0.6) * exp(-pow((lensD - uLensR * 1.5) / (uLensR * 0.15), 2.0)) * 0.5; }
           col = toSRGB(col);
@@ -1697,7 +2801,7 @@ function init(){
   const clock = new THREE.Clock();
   const sph = new THREE.Spherical(), off = new THREE.Vector3();
   let probeDrop = null;
-  let t = 0, flow = 0, frame = 0, hudAcc = 0, screenAcc = 0, perfAcc = 0, perfFrames = 0, lastDrop = -99;
+  let t = 0, wt = 0, flow = 0, frame = 0, hudAcc = 0, screenAcc = 0, perfAcc = 0, perfFrames = 0, lastDrop = -99;
   let depthKm = 0, proper = 0, external = 0, o2 = 87, gamma = 1;
   let started = false;
   const dbg = { cube: true, tether: true, adaptive: true };
@@ -1724,27 +2828,28 @@ function init(){
     const tm = t * (reduceMotion ? 0.5 : 1);
     animate(dt, tm);
     const fs = speed * anim.fx;   // fall speed, including the dive
-    t += dt; flow += dt * FLOW * fs;
+    const wdt = dt * (1 - momentFx.freeze);   // world time: a frozen moment stops everything but the astronaut
+    t += dt; wt += wdt; flow += wdt * FLOW * fs;
     astro.updateMatrixWorld(true);
     if (dbg.tether) updateTether(tm);
-    updateShip(t);
-    updateNovas(t, dt, fs);
+    updateShip(wt);
+    updateNovas(wt, wdt, fs);
 
     pMag.position.set(Math.cos(t * 0.45) * 3.0, Math.sin(t * 0.45) * 3.0, -1.2 + Math.sin(t * 0.41) * 1.0);
     pCyan.position.set(Math.cos(t * 0.45 + Math.PI) * 3.0, Math.sin(t * 0.45 + Math.PI) * 3.0, -0.4 + Math.cos(t * 0.37) * 1.0);
     pMag.intensity = 0.6 + 0.2 * Math.sin(t * 1.3);
     pCyan.intensity = 0.6 + 0.2 * Math.cos(t * 1.1);
 
-    tunnelMat.uniforms.uTime.value = t; tunnelMat.uniforms.uFlow.value = flow;
-    dustMat.uniforms.uTime.value = t; dustMat.uniforms.uFlow.value = flow;
-    streakMat.uniforms.uTime.value = t; streakMat.uniforms.uFlow.value = flow;
+    tunnelMat.uniforms.uTime.value = wt; tunnelMat.uniforms.uFlow.value = flow;
+    dustMat.uniforms.uTime.value = wt; dustMat.uniforms.uFlow.value = flow;
+    streakMat.uniforms.uTime.value = wt; streakMat.uniforms.uFlow.value = flow;
     streakMat.uniforms.uStreak.value = 0.6 + 1.7 * Math.min(fs, 3);
 
     for (const d of debris){
       if (d.captured) continue;
       const m = d.mesh;
-      m.position.z += dt * FLOW * fs * d.k;
-      m.rotation.x += d.spin.x * dt; m.rotation.y += d.spin.y * dt; m.rotation.z += d.spin.z * dt;
+      m.position.z += wdt * FLOW * fs * d.k;
+      m.rotation.x += d.spin.x * wdt; m.rotation.y += d.spin.y * wdt; m.rotation.z += d.spin.z * wdt;
       // pieces slide around the ship instead of through it
       const dzs = m.position.z - ship.position.z;
       if (dzs > -4.5 && dzs < 4.5){
@@ -1780,7 +2885,13 @@ function init(){
     renderer.shadowMap.needsUpdate = frame % shadowEvery === 0;
     gyroApply(raw);
     updateMoments(raw, t);
-    if (composer){ const u = finalPass.uniforms; u.uCA.value = 0.004 + momentFx.ca; u.uLensK.value = momentFx.lensK; if (momentFx.lensK > 0){ u.uLensPos.value.set(momentFx.lensX, momentFx.lensY); u.uLensR.value = momentFx.lensR; } }
+    if (composer){
+      const u = finalPass.uniforms;
+      u.uCA.value = 0.004 + momentFx.ca; u.uLensK.value = momentFx.lensK;
+      if (momentFx.lensK > 0){ u.uLensPos.value.set(momentFx.lensX, momentFx.lensY); u.uLensR.value = momentFx.lensR; }
+      u.uFreeze.value = momentFx.freeze; u.uTintA.value = momentFx.tintA; u.uTintC.value.copy(momentFx.tint);
+      u.uExposure.value = 0.95 * (1 - 0.5 * momentFx.dim);
+    }
     const shk = reduceMotion ? 0 : 0.009 * fs;
     const sx = (Math.sin(t * 37.1) + Math.sin(t * 23.7)) * shk, sy = (Math.sin(t * 41.3) + Math.sin(t * 19.9)) * shk;
     camera.position.x += sx; camera.position.y += sy; camera.updateMatrixWorld();
