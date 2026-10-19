@@ -1353,7 +1353,7 @@ function init(){
 
   /* ===== group 1 · time ===== */
   const TIME = [
-    { name: 'Eco temporal', line: 'Se abre una grieta en el tiempo y salen tus ecos de hace unos segundos… hasta que el tiempo los reclama.', dur: 10, make(P){
+    { name: 'Eco temporal', line: 'Se abre una grieta en el tiempo y salen tus ecos de hace unos segundos. Al verse unos a otros, la paradoja los hace implosionar en cadena.', dur: 11.2, make(P){
       // the rift: a clock-like portal with turning ticks and a swirl inside
       const portal = newGroup();
       portal.add(new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.05, 12, 128), lit(HC(0.8, 1.8, 2.6))));
@@ -1364,55 +1364,117 @@ function init(){
       const swirl = []; for (let i = 0; i < 3; i++){ const s = sprite(nebulaTex, new THREE.Color().setHSL(0.55 + i * 0.08, 0.8, 0.5).multiplyScalar(1.4)); s.scale.setScalar(3.2 - i * 0.5); portal.add(s); swirl.push(s); }
       const core = sprite(novaCoreTex, HC(1.6, 2.2, 2.6)); core.scale.setScalar(1.4); portal.add(core);
       const shock = sprite(novaRingTex, HC(1.0, 1.8, 2.6)); shock.visible = false; scene.add(shock);
-      // three echoes of the astronaut, each further back in time: cyan, blue, violet
-      const COLS = [[0.55, 1.7, 2.6], [0.6, 1.0, 2.6], [1.4, 0.6, 2.6]], DELAY = [1.2, 2.4, 3.6];
+      /* three echoes of you, each one further back in time. They wear the real suit (same materials, same light) and replay
+         what you did seconds ago, until each one notices the one before it: the most recent turns to you, the next to it, the
+         oldest to the next. Every look ties a thread between their visors; the loop of looks is a paradox, and it collapses
+         from the oldest echo down the chain toward the present, each echo imploding into a point. */
+      const S = astro.scale.x, bb = new THREE.Box3().setFromObject(astro), HEAD = (bb.max.y - astro.position.y) * 0.8;
+      const COLS = [HC(0.55, 1.7, 2.6), HC(0.6, 1.0, 2.6), HC(1.4, 0.6, 2.6)], DELAY = [1.2, 2.4, 3.6];
+      const OUT = [1.0, 1.6, 2.2], SEE = [3.6, 4.7, 5.8], BOOM = [8.8, 7.9, 7.0];   // stepping out · noticing · imploding (the oldest first)
+      const ALONG = [0.3, 0.52, 0.74], SIDE = [1.8, -1.6, 1.3], RISE = [0.4, 0.75, 0.3];   // where each one stands, from you toward the rift
       const echoes = COLS.map((col) => {
         const { c: ghost, dst } = cloneClean(astro);
-        const mat = new THREE.ShaderMaterial({
-          uniforms: { uFade: { value: 0 }, uTime: { value: 0 }, uRim: { value: new THREE.Color(col[0], col[1], col[2]) } }, transparent: true, depthWrite: false, vertexShader: FRES_VS,
-          fragmentShader: `uniform float uFade, uTime; uniform vec3 uRim; varying vec3 vN; varying vec3 vV;
-            void main(){
-              float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-              float scan = 0.7 + 0.3 * sin(gl_FragCoord.y * 0.9 - uTime * 24.0);
-              vec3 c = mix(vec3(0.02, 0.04, 0.1), uRim * (0.4 + 2.8 * f * f) * scan, 0.2 + 0.8 * smoothstep(0.0, 0.9, f));
-              gl_FragColor = vec4(c, uFade * (0.6 + 0.4 * f));
-            }` });
-        ghost.traverse((o) => { if (o.isMesh){ o.material = mat; o.castShadow = false; o.receiveShadow = false; } });
-        ghost.visible = false; ghost.scale.setScalar(1.3); scene.add(ghost);
-        const halo = darkHalo(4.5); halo.visible = false; scene.add(halo);
-        return { ghost, dst, mat, halo, pos: new THREE.Vector3() };
+        ghost.traverse((o) => { if (o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
+        ghost.visible = false; scene.add(ghost);
+        const shade = darkHalo(2.6); shade.material.opacity = 0.3; shade.visible = false; scene.add(shade);   // a little contrast against the bright tunnel
+        const ring = sprite(novaRingTex, col.clone().multiplyScalar(0.55)); ring.visible = false; scene.add(ring);   // the faint ring of its own time
+        const thread = pointsOf(80, 0.09, col.clone().multiplyScalar(1.5)); thread.p.visible = false; scene.add(thread.p);
+        const lineG = new THREE.BufferGeometry(), linePos = new Float32Array(24 * 3); lineG.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
+        const line = new THREE.Line(lineG, new THREE.LineBasicMaterial({ color: col.clone().multiplyScalar(1.6), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); line.frustumCulled = false; line.visible = false; scene.add(line);
+        const voidS = darkHalo(1); voidS.material.opacity = 0.9; voidS.visible = false; scene.add(voidS);
+        const flash = sprite(novaCoreTex, HC(2.6, 2.4, 2.4)); flash.visible = false; scene.add(flash);
+        const wave = sprite(novaRingTex, col.clone().multiplyScalar(1.8)); wave.visible = false; scene.add(wave);
+        const glint = sprite(novaCoreTex, col.clone().multiplyScalar(2.2)); glint.visible = false; scene.add(glint);   // the spark in its visor as it notices
+        const sparks = pointsOf(80, 0.07, col.clone().multiplyScalar(1.8)); sparks.p.visible = false; scene.add(sparks.p);
+        const seed = []; for (let k = 0; k < 80; k++) seed.push(V(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(0.4 + Math.random() * 1.1));
+        return { ghost, dst, shade, ring, thread, line, linePos, voidS, flash, wave, glint, sparks, seed, pos: new THREE.Vector3(), head: new THREE.Vector3(), gone: false };
       });
-      const trail = pointsOf(150, 0.09, HC(0.9, 1.6, 2.6)); trail.p.visible = false; scene.add(trail.p);   // a stream of light linking the echoes
-      const home = at(P, 0, 0, 1), slots = [at(P, -2.2, -0.6, -2.0), at(P, 0, 0.4, -2.6), at(P, 2.2, -0.4, -2.0)];
+      const pulse = sprite(novaCoreTex, HC(2.6, 2.3, 2.6)); pulse.visible = false; scene.add(pulse);   // the collapse running down the chain
+      const hitFlash = sprite(novaCoreTex, HC(2.4, 2.2, 2.6)); hitFlash.visible = false; scene.add(hitFlash);
+      const home = at(P, 0, 0, 1), aim = new THREE.Object3D(), side = new THREE.Vector3(), upW = new THREE.Vector3(), tmp = new THREE.Vector3(), base = new THREE.Vector3(), youHead = new THREE.Vector3();
+      const headOf = (obj, out) => out.set(0, HEAD, 0).applyQuaternion(obj.quaternion).multiplyScalar(obj.scale.y / S).add(obj.position);
+      const lensAt = (p, rr) => {   // a tiny black hole where an echo collapses
+        _mndc.copy(p).project(camera); if (_mndc.z > 1 || Math.abs(_mndc.x) > 1.4 || Math.abs(_mndc.y) > 1.4 || rr <= 0.001) return;
+        const r = 0.5 * rr / (camera.position.distanceTo(p) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+        if (r * r * 5.76 > momentFx.lensK){ momentFx.lensK = Math.pow(r * 2.4, 2); momentFx.lensR = r; momentFx.lensX = _mndc.x * 0.5 + 0.5; momentFx.lensY = _mndc.y * 0.5 + 0.5; }
+      };
+      const ripAt = (p, a, r) => { _mndc.copy(p).project(camera); if (_mndc.z < 1 && a > momentFx.ripA){ momentFx.ripA = a; momentFx.ripX = _mndc.x * 0.5 + 0.5; momentFx.ripY = _mndc.y * 0.5 + 0.5; momentFx.ripR = r; } };
       return {
-        start(){ portal.position.copy(home); faceCam(portal); portal.visible = trail.p.visible = true; echoes.forEach((E) => { E.ghost.visible = E.halo.visible = true; }); shock.visible = true; },
-        update(lt, raw, t){
-          const now = performance.now() / 1000, open = easeIO(smooth(0, 1.0, lt)) * (1 - easeIO(smooth(8.6, 9.3, lt)));
-          portal.scale.setScalar(Math.max(0.001, open)); tickRing.rotation.z -= raw * (0.6 + 4 * smooth(7.0, 8.6, lt));   // the clock runs backwards, faster at the end
-          swirl.forEach((s, i) => { s.material.rotation += raw * (0.4 + i * 0.3) * (i % 2 ? -1 : 1); s.material.opacity = 0.7 * open; });
-          core.material.opacity = open * (0.7 + 0.3 * Math.sin(t * 9));
-          const rewind = smooth(7.0, 8.6, lt);
-          echoes.forEach((E, i) => {
-            // each echo steps out of the rift in turn, and is pulled back in reverse order
-            const out = easeIO(smooth(1.0 + i * 0.5, 2.2 + i * 0.5, lt)) * (1 - easeIO(smooth(7.0 + (2 - i) * 0.4, 8.0 + (2 - i) * 0.4, lt)));
-            E.pos.lerpVectors(home, slots[i], out).addScaledVector(P.up, 0.15 * Math.sin(t * 0.9 + i * 2));
-            E.ghost.position.copy(E.pos); E.ghost.scale.setScalar(1.3 * Math.max(0.05, out));
-            poseAt(E.dst, now, DELAY[i] + rewind * rewind * 4);   // replaying your own moves from seconds ago, then rewinding
-            const glitch = (lt < 2.6 + i * 0.5 || rewind > 0) && !reduceMotion ? (Math.sin(t * 53 + i * 7) > -0.3 ? 1 : 0.3) : 1;
-            E.mat.uniforms.uFade.value = out * glitch; E.mat.uniforms.uTime.value = t;
-            E.halo.position.copy(E.pos).addScaledVector(P.out, 1.3); E.halo.material.opacity = 0.7 * out;
-          });
-          for (let k = 0; k < 150; k++){   // light flowing from the rift through the echoes
-            const f = ((k / 150) + lt * 0.35) % 1, seg = Math.min(2, Math.floor(f * 3)), q = f * 3 - seg;
-            const p0 = seg === 0 ? home : echoes[seg - 1].pos, p1 = echoes[seg].pos;
-            _mp.lerpVectors(p0, p1, q).addScaledVector(P.up, Math.sin(q * Math.PI) * 0.4);
-            trail.pos.set([_mp.x, _mp.y, _mp.z], k * 3);
-          }
-          trail.flush(); trail.mat.opacity = 0.7 * open * (1 - rewind);
-          const sk = smooth(9.1, 9.9, lt); shock.position.copy(home); shock.scale.setScalar(1 + 12 * sk); shock.material.opacity = smooth(9.0, 9.15, lt) * (1 - sk);   // the rift snaps shut
-          momentFx.ca += 0.02 * (1 - smooth(0, 1.0, lt)) + 0.03 * rewind * (1 - smooth(8.6, 9.3, lt)) + 0.05 * smooth(9.0, 9.15, lt) * (1 - sk);
+        start(){
+          portal.position.copy(home); faceCam(portal); portal.visible = shock.visible = true;
+          echoes.forEach((E) => { E.gone = false; E.ghost.visible = E.shade.visible = E.ring.visible = E.thread.p.visible = E.line.visible = E.voidS.visible = E.flash.visible = E.wave.visible = E.glint.visible = E.sparks.p.visible = true; E.ghost.scale.setScalar(0.001); });
+          pulse.visible = hitFlash.visible = true;
         },
-        end(){ portal.visible = trail.p.visible = shock.visible = false; echoes.forEach((E) => { E.ghost.visible = E.halo.visible = false; }); }
+        update(lt, raw, t){
+          const now = performance.now() / 1000, open = easeIO(smooth(0, 1.0, lt)) * (1 - easeIO(smooth(9.6, 10.2, lt)));
+          const paradox = smooth(6.2, 6.9, lt) * (1 - smooth(9.2, 9.8, lt));
+          portal.scale.setScalar(Math.max(0.001, open)); tickRing.rotation.z -= raw * (0.6 + 6 * paradox);   // the clock races backwards while the paradox lasts
+          swirl.forEach((s, i) => { s.material.rotation += raw * (0.4 + i * 0.3 + 2 * paradox) * (i % 2 ? -1 : 1); s.material.opacity = 0.7 * open; });
+          core.material.opacity = open * (0.7 + 0.3 * Math.sin(t * 9));
+          side.set(1, 0, 0).applyQuaternion(camera.quaternion); upW.set(0, 1, 0);
+          headOf(astro, youHead);
+          echoes.forEach((E, i) => {
+            const pred = i === 0 ? astro : echoes[i - 1].ghost, predHead = i === 0 ? youHead : echoes[i - 1].head;
+            // where it stands: on the line from you to the rift, a little to the side, breathing
+            base.lerpVectors(astro.position, home, ALONG[i]).addScaledVector(side, SIDE[i]).addScaledVector(upW, RISE[i] + 0.12 * Math.sin(t * 0.9 + i * 2));
+            const out = easeIO(smooth(OUT[i], OUT[i] + 1.1, lt));
+            E.pos.lerpVectors(home, base, out);
+            // it notices the one before it: a start, a turn of the whole body, and then it stays frozen, staring
+            const see = smooth(SEE[i], SEE[i] + 0.7, lt), jolt = Math.exp(-Math.pow((lt - SEE[i] - 0.25) / 0.22, 2));
+            if (jolt > 0.01) E.pos.addScaledVector(tmp.copy(E.pos).sub(pred.position).normalize(), 0.3 * jolt);
+            // the collapse: sucked into a point, spinning and stretching
+            const kk = smooth(BOOM[i] - 0.5, BOOM[i], lt), after = smooth(BOOM[i], BOOM[i] + 0.9, lt);
+            const tremble = paradox * (1 - kk) * 0.03 * Math.sin(t * 70 + i * 3);
+            E.ghost.position.copy(E.pos).addScaledVector(side, tremble);
+            poseAt(E.dst, now, DELAY[i] + Math.max(0, lt - SEE[i]));   // replays your past moves, and holds still once it has seen
+            aim.position.copy(E.pos); aim.lookAt(pred.position); E.ghost.quaternion.slerp(aim.quaternion, see);
+            if (kk > 0) E.ghost.rotateY(kk * kk * 10);
+            const sc = S * Math.max(0.001, out) * Math.max(0.001, 1 - Math.pow(kk, 1.8));
+            E.ghost.scale.set(sc * (1 - 0.4 * kk), sc * (1 + 0.9 * kk * (1 - kk)), sc * (1 - 0.4 * kk));
+            const flick = (lt < OUT[i] + 0.45 || (kk > 0 && kk < 1)) && !reduceMotion ? Math.sin(t * 61 + i * 5) > -0.5 : true;   // unstable as it arrives and as it goes
+            E.ghost.visible = !E.gone && out > 0.01 && kk < 1 && flick;
+            if (kk >= 1) E.gone = true;
+            headOf(E.ghost, E.head);
+            const alive = out * (1 - kk);
+            E.shade.position.copy(E.pos).add(tmp.copy(E.pos).sub(camera.position).normalize().multiplyScalar(0.8)); E.shade.material.opacity = 0.3 * alive;
+            E.ring.position.copy(E.pos); E.ring.scale.setScalar(1.6 + 0.15 * Math.sin(t * 2 + i)); E.ring.material.opacity = 0.35 * alive; E.ring.material.rotation += raw * (0.5 + paradox * 4);
+            // the visor sparks when it notices, and a thread of light ties the two visors together
+            const g = Math.exp(-Math.pow((lt - SEE[i] - 0.3) / 0.18, 2)); E.glint.position.copy(E.head); E.glint.scale.setScalar(0.5 + 1.2 * g); E.glint.material.opacity = g * alive;
+            const ruin = smooth(BOOM[i] + 0.35, BOOM[i] + 0.6, lt);   // the thread burns away once the collapse has run through it
+            const th = smooth(SEE[i] + 0.35, SEE[i] + 0.9, lt) * (1 - ruin);
+            for (let k = 0; k < 80; k++){
+              const q = ((k / 80) + lt * (0.4 + paradox)) % 1;
+              tmp.lerpVectors(E.head, predHead, q).addScaledVector(upW, Math.sin(q * Math.PI) * 0.18);
+              E.thread.pos.set([tmp.x, tmp.y, tmp.z], k * 3);
+            }
+            E.thread.flush(); const flick2 = paradox > 0 ? 0.5 + 0.5 * Math.sin(t * 38 + i) : 1; E.thread.mat.opacity = th * (0.55 + 0.45 * flick2);
+            for (let k = 0; k < 24; k++){ const q = k / 23; tmp.lerpVectors(E.head, predHead, q).addScaledVector(upW, Math.sin(q * Math.PI) * 0.18); E.linePos[k * 3] = tmp.x; E.linePos[k * 3 + 1] = tmp.y; E.linePos[k * 3 + 2] = tmp.z; }
+            E.line.geometry.attributes.position.needsUpdate = true; E.line.material.opacity = th * (0.5 + 0.5 * flick2);
+            // the implosion: darkness swallows it, a flash, a ring of light, the sparks pulled in and then thrown out
+            E.voidS.position.copy(E.pos); E.voidS.scale.setScalar(Math.max(0.001, 2.6 * Math.sin(Math.PI * Math.min(1, kk * 1.05)))); E.voidS.material.opacity = 0.85 * Math.sin(Math.PI * kk);
+            const f = Math.exp(-Math.pow((lt - BOOM[i]) / 0.09, 2)); E.flash.position.copy(E.pos); E.flash.scale.setScalar(0.3 + 3.2 * f); E.flash.material.opacity = f;
+            E.wave.position.copy(E.pos); E.wave.scale.setScalar(0.4 + 6 * after); E.wave.material.opacity = after > 0 ? (1 - after) * 0.85 : 0;
+            for (let k = 0; k < 80; k++){ const sd = E.seed[k], r = kk < 1 ? (1 - kk) * 1.1 : after * 3.2; tmp.copy(E.pos).addScaledVector(sd, r); E.sparks.pos.set([tmp.x, tmp.y, tmp.z], k * 3); }
+            E.sparks.flush(); E.sparks.mat.opacity = kk > 0 ? (kk < 1 ? kk : 1 - after) * 0.95 : 0;
+            if (kk > 0.15 && kk < 1) lensAt(E.pos, 0.32 * Math.sin(Math.PI * kk));
+            if (after > 0 && after < 1) ripAt(E.pos, (1 - after) * 0.9, after * 0.8);
+            momentFx.ca += 0.035 * f + 0.004 * kk * (1 - kk) * 4;
+          });
+          // the collapse runs down the threads: from each imploded echo to the one before it, and at last to you
+          let pk = -1, pa = null, pb = null;
+          for (let i = 2; i >= 0; i--){ const q = smooth(BOOM[i] + 0.05, BOOM[i] + 0.4, lt); if (q > 0 && q < 1){ pk = q; pa = echoes[i].pos; pb = i === 0 ? youHead : echoes[i - 1].head; } }
+          pulse.visible = pk >= 0; if (pk >= 0){ pulse.position.lerpVectors(pa, pb, pk); pulse.scale.setScalar(0.8 + 0.4 * Math.sin(t * 40)); pulse.material.opacity = 1; }
+          // the last of it reaches you: a flash at your visor and a shove; you are the only one left
+          const hit = Math.exp(-Math.pow((lt - (BOOM[0] + 0.42)) / 0.1, 2)), shove = smooth(BOOM[0] + 0.4, BOOM[0] + 0.55, lt) * (1 - smooth(BOOM[0] + 0.8, BOOM[0] + 1.9, lt));
+          hitFlash.position.copy(youHead); hitFlash.scale.setScalar(0.4 + 2.6 * hit); hitFlash.material.opacity = hit;
+          if (shove > 0){ momentFx.astro.addScaledVector(tmp.copy(astro.position).sub(echoes[0].pos).normalize(), 0.6 * shove); momentFx.astroSpin += 1.6 * hit; }
+          // the real you looks at its newest echo once it has noticed you, and keeps watching the chain until it is gone
+          if (lt > SEE[0] - 0.4 && lt < BOOM[0] + 0.3){ momentFx.look.copy(echoes[0].pos); momentFx.lookOn = true; }
+          const sk = smooth(10.0, 10.9, lt); shock.position.copy(home); shock.scale.setScalar(1 + 12 * sk); shock.material.opacity = smooth(9.95, 10.1, lt) * (1 - sk);   // the rift snaps shut
+          momentFx.ca += 0.02 * (1 - smooth(0, 1.0, lt)) + 0.006 * paradox + 0.04 * hit + 0.05 * smooth(9.95, 10.1, lt) * (1 - sk);
+          momentFx.dim += 0.2 * paradox;
+        },
+        end(){ portal.visible = shock.visible = pulse.visible = hitFlash.visible = false; echoes.forEach((E) => { E.ghost.visible = E.shade.visible = E.ring.visible = E.thread.p.visible = E.line.visible = E.voidS.visible = E.flash.visible = E.wave.visible = E.glint.visible = E.sparks.p.visible = false; }); }
       };
     } },
     { name: 'Reloj derretido', line: 'Las agujas giran hacia atrás y las horas se escurren.', dur: 8, make(P){
@@ -3997,7 +4059,7 @@ function init(){
   // a different sequence for each of the 50 events: [seconds into the event, gesture, options]
   const AWE = 'awe', FEAR = 'fear';
   const REACT = {
-    'Eco temporal': [AWE, [[0.6, 'wave', { speed: 3 }], [6.5, 'recoil']]],
+    'Eco temporal': [AWE, [[0.6, 'gasp'], [2.6, 'wave', { speed: 3 }], [4.0, 'reach'], [6.4, 'gasp', { tremble: 0.6 }], [9.2, 'recoil'], [10.4, 'look']]],
     'Reloj derretido': [AWE, [[0.8, 'point'], [3, 'helmet']]],
     'Déjà vu': [FEAR, [[0.3, 'look'], [2.4, 'point'], [4.8, 'helmet', { tremble: 0.3 }]]],
     'Tiempo congelado': [AWE, [[0.2, 'look']]],
@@ -4056,7 +4118,7 @@ function init(){
   const tintTo = (r, g, b, a) => { momentFx.tint.setRGB(r, g, b); momentFx.tintA = Math.max(momentFx.tintA, a); };
   const ENVFX = {
     // time: the fall slows, stops or runs backwards
-    'Eco temporal': (lt) => { momentFx.flowMul *= 1 - 2.6 * smooth(6.5, 7.2, lt) * (1 - smooth(8.4, 9.2, lt)); },
+    'Eco temporal': (lt) => { momentFx.flowMul *= 1 - 1.8 * smooth(6.2, 6.9, lt) * (1 - smooth(9.2, 9.8, lt)); },   // the fall runs backwards while the paradox lasts
     'Reloj derretido': (lt) => { const m = smooth(2, 7, lt) * (1 - smooth(7.2, 8, lt)); momentFx.flowMul *= 1 - 1.8 * m; tintTo(1.0, 0.75, 0.4, 0.25 * m); },
     'Déjà vu': (lt) => { const loopK = (lt % 2.4) / 2.4; momentFx.flowMul *= loopK < 0.12 ? -3 : 1; momentFx.ca += loopK < 0.12 ? 0.03 : 0; },   // each pass rewinds the world for an instant
     'Reloj de arena': (lt) => { const k = env(lt, 8.5, 1.5, 1.5); momentFx.flowMul *= 1 - 1.7 * k; tintTo(1.0, 0.8, 0.45, 0.25 * k); },
