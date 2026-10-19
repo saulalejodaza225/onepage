@@ -2796,9 +2796,9 @@ function init(){
       if (p.dwell >= DWELL){ playPoint(p); continue; }
       const g = p.glint, pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + p.ph);
       g.visible = true;
-      g.material.opacity = Math.min(1, 0.1 + 0.12 * pulse + 0.65 * near);
-      g.scale.setScalar(p.glint0 * (0.4 + 0.12 * pulse + 0.8 * near + 1.2 * p.dwell / DWELL));
-      p.ring.visible = near > 0.01; p.ring.material.opacity = 0.4 * near; p.ring.material.rotation += raw * 0.6;
+      g.material.opacity = Math.min(1, 0.035 + 0.045 * pulse + 0.5 * near);
+      g.scale.setScalar(p.glint0 * (0.28 + 0.08 * pulse + 0.7 * near + 1.1 * p.dwell / DWELL));
+      p.ring.visible = near > 0.01; p.ring.material.opacity = 0.22 * near; p.ring.material.rotation += raw * 0.6;
       p.ring.scale.setScalar(p.glint0 * (1.6 + 0.2 * Math.sin(t * 1.7 + p.ph) + 1.2 * near - 0.8 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
     }
     stepFx(raw, t);
