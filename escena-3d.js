@@ -3379,10 +3379,14 @@ function init(){
       }
       yield;
       // its shaders are handed to the driver now, without waiting for them (they finish in parallel, long before the show)
-      { const ce = renderer.debug.checkShaderErrors, kids = dio.children.slice(), lights = kids.filter((o) => o.isLight);   // one piece at a time
-        renderer.debug.checkShaderErrors = false;
-        for (const o of kids){ if (o.isLight) continue; dio.children = lights.concat([o]); renderer.compile(dio, dcam); yield; }
-        dio.children = kids; renderer.debug.checkShaderErrors = ce; }
+      { const kids = dio.children.slice(), lights = kids.filter((o) => o.isLight);   // one piece at a time, leaving everything as it was between pieces
+        for (const o of kids){
+          if (o.isLight) continue;
+          const ce = renderer.debug.checkShaderErrors; renderer.debug.checkShaderErrors = false;
+          dio.children = lights.concat([o]); renderer.compile(dio, dcam); dio.children = kids;
+          renderer.debug.checkShaderErrors = ce;
+          yield;
+        } }
       yield;
       const home = new THREE.Vector3(), near = new THREE.Vector3(), fwd = new THREE.Vector3(), faceQ = new THREE.Quaternion();
       const qRef = new THREE.Quaternion(), qD = new THREE.Quaternion(), qS = new THREE.Quaternion(), qI = new THREE.Quaternion();
@@ -3827,19 +3831,22 @@ function init(){
 
   /* ===== the five activation points ===== */
   const LIFT = THREE.MathUtils.degToRad(12);   // how far above the centre of the view the events appear
-  // each light waits in its own direction around the astronaut; the arrow on the aim leads to the nearest one
+  // the lights ring the ship at the throat of the tunnel, beside its supernovas: about 20° from where the aim rests in the first
+  // view (four of them on screen even on an upright phone), so a small tilt reaches one, yet none fires on its own (the aim catches at 16.5°)
   const LIGHTS = document.getElementById('lights');
   const D2R = THREE.MathUtils.degToRad;
+  const cam0 = new THREE.PerspectiveCamera(); cam0.position.copy(MT).add(new THREE.Vector3().setFromSpherical(HOME)); cam0.lookAt(MT); cam0.updateMatrixWorld();   // the first view
   const points = [
-    { theta: 0.9, phi: 0.7, dist: 8, color: HC(0.5, 1.4, 2.0), defs: TIME },             // in front, down and to the left (mirrors the physics point)
-    { theta: 1.75, phi: 1.75, dist: 10, color: HC(2.0, 0.5, 1.6), defs: CREATURES },      // left, a little up
-    { theta: -1.5, phi: 1.7, dist: 7, color: HC(0.6, 2.2, 1.2), defs: VISITORS },         // right
-    { theta: -0.9, phi: 0.7, dist: 8, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },          // down and to the right
-    { theta: 0.75, phi: 2.1, dist: 9, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }           // up and to the left
+    { yaw: -15, pitch: -1, dist: 13, color: HC(0.5, 1.4, 2.0), defs: TIME },             // below the ship, to the left (mirrors the physics light)
+    { yaw: -15, pitch: 25, dist: 15, color: HC(2.0, 0.5, 1.6), defs: CREATURES },        // above the ship, to the left
+    { yaw: 15, pitch: 25, dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },          // above the ship, to the right
+    { yaw: 15, pitch: -1, dist: 13, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },           // below the ship, to the right
+    { yaw: 0, pitch: 34, dist: 15, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }            // straight above the ship
   ].map((d) => {
-    const out = viewDir(d.theta, d.phi), right = new THREE.Vector3().crossVectors(out, V(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, out).normalize();
-    // the events sit a little above the astronaut, so the astronaut never hides them
-    const anchor = MT.clone().addScaledVector(out, d.dist).addScaledVector(up, (d.dist + 4.15) * Math.tan(LIFT)), glint = sprite(novaCoreTex, d.color);
+    const y = D2R(d.yaw), x = D2R(d.pitch);
+    const out = V(Math.sin(y) * Math.cos(x), Math.sin(x), -Math.cos(y) * Math.cos(x)).applyQuaternion(cam0.quaternion).normalize();
+    const right = new THREE.Vector3().crossVectors(out, V(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, out).normalize();
+    const anchor = cam0.position.clone().addScaledVector(out, d.dist), glint = sprite(novaCoreTex, d.color);
     glint.position.copy(anchor); scene.add(glint);
     const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); scene.add(ring);
     const aura = sprite(nebulaTex, d.color.clone().multiplyScalar(0.3)); aura.position.copy(anchor).addScaledVector(out, 2); aura.visible = false; scene.add(aura);
@@ -3848,7 +3855,7 @@ function init(){
     const cc = d.color.clone(), mx = Math.max(cc.r, cc.g, cc.b); cc.multiplyScalar(1 / mx).convertLinearToSRGB();
     orb.style.setProperty('--c', 'rgb(' + Math.round(cc.r * 255) + ',' + Math.round(cc.g * 255) + ',' + Math.round(cc.b * 255) + ')');
     if (LIGHTS) LIGHTS.appendChild(orb);
-    return { anchor, out, right, up, color: d.color, ring, aura, orb, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * (d.dist + 4.15), state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
+    return { anchor, out, right, up, color: d.color, ring, aura, orb, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });
   function nextIndex(p){
     if (!p.bag.length){
@@ -3865,6 +3872,53 @@ function init(){
     clearTimeout(toastTimer); clearTimeout(toastHide);
     toastTimer = setTimeout(() => { el.classList.remove('show'); toastHide = setTimeout(() => { el.hidden = true; }, 400); }, 4500);
   }
+  /* when an event starts, the camera glides to the view that frames it best: its light at the sweet spot above the astronaut
+     (the spot every event is built around). With the gyroscope on, the reference of the phone shifts instead, so you keep
+     looking around from that new centre. */
+  let focus = null, cineBack = false;
+  const _fv = new THREE.Vector3(), _fd = new THREE.Vector3(), _fr = new THREE.Vector3(), _fu = new THREE.Vector3(), _fs = new THREE.Spherical();
+  const YAXIS = V(0, 1, 0), wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  function viewScore(r, phi, theta, anchor){
+    _fv.setFromSphericalCoords(r, phi, theta).add(controls.target);   // the camera there, looking at the astronaut
+    _fd.copy(controls.target).sub(_fv).normalize(); _fr.crossVectors(_fd, YAXIS).normalize(); _fu.crossVectors(_fr, _fd);
+    _fd.multiplyScalar(Math.cos(LIFT)).addScaledVector(_fu, Math.sin(LIFT));
+    return _fd.dot(_fr.copy(anchor).sub(_fv).normalize());
+  }
+  function bestView(anchor, r, phi, theta){   // a short climb over the orbit
+    let best = viewScore(r, phi, theta, anchor), step = 0.35;
+    for (let it = 0; it < 60 && step > 0.002; it++){
+      let moved = false;
+      for (const [dp, dt] of [[step, 0], [-step, 0], [0, step], [0, -step]]){
+        const p2 = THREE.MathUtils.clamp(phi + dp, 0.78, 2.15), sc = viewScore(r, p2, theta + dt, anchor);
+        if (sc > best){ best = sc; phi = p2; theta += dt; moved = true; }
+      }
+      if (!moved) step *= 0.5;
+    }
+    return { phi, theta };
+  }
+  function focusOn(anchor){
+    if (typeof stab !== 'undefined') stab = null;
+    if (cineOn()){ cineBack = true; setCine(false); }
+    _fs.setFromVector3(_fv.copy(camera.position).sub(controls.target));
+    const r = _fs.radius;
+    if (gyro.on && gyro.cal){
+      // where the phone points now, on top of the reference; move the reference so that this pose shows the event
+      _ge.setFromQuaternion(gyro.cur, 'YXZ');
+      const nowPhi = THREE.MathUtils.clamp(gyro.cal.phi + _ge.x * GYRO_GAIN, 0.3, 2.85), nowTheta = gyro.cal.theta + _ge.y * GYRO_GAIN;
+      const b = bestView(anchor, gyro.cal.r, nowPhi, nowTheta);
+      focus = { t: 0, d: 1.3, gy: true, p0: gyro.cal.phi, t0: gyro.cal.theta, p1: gyro.cal.phi + (b.phi - nowPhi), t1: gyro.cal.theta + wrapA(b.theta - nowTheta) };
+    } else {
+      const b = bestView(anchor, r, _fs.phi, _fs.theta);
+      focus = { t: 0, d: 1.3, gy: false, r, p0: _fs.phi, t0: _fs.theta, p1: b.phi, t1: _fs.theta + wrapA(b.theta - _fs.theta) };
+    }
+  }
+  function stepFocus(raw){
+    if (!focus) return;
+    focus.t += raw; const k = easeIO(Math.min(1, focus.t / focus.d)), ph = lerp(focus.p0, focus.p1, k), th = lerp(focus.t0, focus.t1, k);
+    if (focus.gy){ if (gyro.on && gyro.cal){ gyro.cal.phi = ph; gyro.cal.theta = th; } }
+    else camera.position.copy(controls.target).add(_fv.setFromSphericalCoords(focus.r, ph, th));
+    if (focus.t >= focus.d) focus = null;
+  }
   function playPoint(p, idx){
     const i = idx != null ? idx : p.first ? 0 : nextIndex(p), def = p.defs[i];
     p.first = false;
@@ -3874,18 +3928,18 @@ function init(){
     p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false; found++;
     points.forEach((q) => { if (q !== p && q.state === 'spent') q.state = 'idle'; });   // activating a point brings the spent ones back
     toast(def);
-    fireBurst(p); astroReact(def, p);
+    fireBurst(p); astroReact(def, p); focusOn(p.anchor);
   }
   // the heaviest event builds its little world in a quiet moment after the page loads, so it opens instantly
   const idle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 300 }) : (f) => setTimeout(() => f({ timeRemaining: () => 8 }), 30);
   setTimeout(() => points.forEach((p) => p.defs.forEach((d) => {
     if (!d.prewarm || d.inst) return;
     try { d.inst = d.make(p, d); } catch (err){ console.error(err); return; }
-    const go = (dl) => { try { while (!d.inst.step()){ if (dl.timeRemaining() < 3){ idle(go); return; } } } catch (err){ console.error(err); } };   // a few milliseconds at a time
+    const go = (dl) => { try { while (!d.inst.step()){ if (dl.timeRemaining() < 3 || points.some((q) => q.state === 'on')){ idle(go); return; } } } catch (err){ console.error(err); } };   // a few milliseconds at a time, and never while an event is playing
     idle(go);
   })), 3500);
-  // a wide aim: 33°, the most it can be while every light is still out of reach from the first view (the nearest sits at 39°)
-  const GAZE = Math.cos(D2R(33)), NEAR = Math.cos(D2R(37)), DWELL = 0.55;
+  // the aim recognises a light within 16.5° of its centre, and starts to colour from 26°
+  const GAZE = Math.cos(D2R(16.5)), NEAR = Math.cos(D2R(26)), DWELL = 0.55;
   let found = 0;
   const cineOn = () => { try { return cine; } catch (err){ return false; } };   // declared further down, with the UI
   /* tap a light to play it: a short tap (not a drag) close to where the light is on screen */
@@ -3961,7 +4015,7 @@ function init(){
         p.ring.visible = false;
         p.time += raw;
         try { p.cur.inst.update(p.time, raw, t); const fx = ENVFX[p.cur.name]; if (fx) fx(p.time, raw, t, p); } catch (err){ console.error(err); p.time = p.cur.dur; }
-        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; }
+        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; if (cineBack){ cineBack = false; setCine(true); } }
         continue;
       }
       if (p.state === 'spent'){ p.glint.visible = p.ring.visible = false; continue; }
@@ -4216,7 +4270,7 @@ function init(){
   if (/debug/.test(location.hash)) window.__momentos = {
     play: (pi, si) => playPoint(points[pi], si),
     look(pi){ setCine(false); camera.position.copy(MT).addScaledVector(points[pi].out, -4.15); camera.lookAt(MT); },
-    points, momentFx, camera, astro, residents, gyro, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
+    points, momentFx, camera, astro, residents, renderer, gyro, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
   };
 
   /* ---------- lights ---------- */
@@ -4361,6 +4415,7 @@ function init(){
   const BLOCKED = 'El visor donde se abre esta página bloquea los sensores de movimiento. Ábrela en tu propia web (con https) y el giroscopio funcionará.';
   let stab = null; const _stP = new THREE.Vector3(), _stH = new THREE.Vector3();
   function stabilize(){
+    focus = null;
     setCine(false);
     if (gyro.on){ goHome(); gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); return; }   // with the gyroscope, the current pose becomes the new centre
     stab = { t: 0, from: camera.position.clone() };
@@ -4466,6 +4521,7 @@ function init(){
       sph.phi += (1.24 + 0.07 * Math.sin(t * 0.083 + 1.3) - sph.phi) * k;
       off.setFromSpherical(sph); camera.position.copy(controls.target).add(off);
     }
+    stepFocus(raw);   // gliding to the best view of an event that has just started
     if (stab){   // gliding back to the home view
       stab.t += raw; const k = easeIO(Math.min(1, stab.t / 0.9));
       _stP.copy(controls.target).add(_stH.setFromSpherical(HOME)); camera.position.lerpVectors(stab.from, _stP, k);
