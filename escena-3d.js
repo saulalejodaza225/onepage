@@ -2736,7 +2736,7 @@ function init(){
   /* ===== the five activation points ===== */
   const LIFT = THREE.MathUtils.degToRad(12);   // how far above the centre of the view the events appear
   const points = [
-    { theta: Math.PI, phi: 1.0, dist: 6, color: HC(0.5, 1.4, 2.0), defs: TIME },          // behind, low
+    { theta: 0.9, phi: 0.7, dist: 8, color: HC(0.5, 1.4, 2.0), defs: TIME },             // in front, down and to the left (mirrors the physics point)
     { theta: 1.75, phi: 1.75, dist: 10, color: HC(2.0, 0.5, 1.6), defs: CREATURES },      // left, a little up
     { theta: -1.5, phi: 1.7, dist: 7, color: HC(0.6, 2.2, 1.2), defs: VISITORS },         // right
     { theta: -0.9, phi: 0.7, dist: 8, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },          // down and to the right
@@ -2748,7 +2748,7 @@ function init(){
     glint.position.copy(anchor); scene.add(glint);
     const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); scene.add(ring);
     const aura = sprite(nebulaTex, d.color.clone().multiplyScalar(0.45)); aura.position.copy(anchor).addScaledVector(out, 2); aura.visible = false; scene.add(aura);
-    return { anchor, out, right, up, color: d.color, ring, aura, defs: d.defs, bag: [], last: -1, glint, glint0: 0.11 * (d.dist + 4), state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
+    return { anchor, out, right, up, color: d.color, ring, aura, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.11 * (d.dist + 4), state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });
   function nextIndex(p){
     if (!p.bag.length){
@@ -2766,7 +2766,8 @@ function init(){
     toastTimer = setTimeout(() => { el.classList.remove('show'); toastHide = setTimeout(() => { el.hidden = true; }, 400); }, 4500);
   }
   function playPoint(p, idx){
-    const i = idx == null ? nextIndex(p) : idx, def = p.defs[i];
+    const i = idx != null ? idx : p.first ? 0 : nextIndex(p), def = p.defs[i];
+    p.first = false;
     p.last = i;
     try { if (!def.inst) def.inst = def.make(p, def); def.inst.start(); }
     catch (err){ console.error(err); p.state = 'spent'; p.glint.visible = false; return; }
@@ -2795,9 +2796,9 @@ function init(){
       if (p.dwell >= DWELL){ playPoint(p); continue; }
       const g = p.glint, pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + p.ph);
       g.visible = true;
-      g.material.opacity = Math.min(1, 0.4 + 0.3 * pulse + 0.5 * near);
-      g.scale.setScalar(p.glint0 * (0.7 + 0.3 * pulse + 0.8 * near + 1.4 * p.dwell / DWELL));
-      p.ring.visible = true; p.ring.material.opacity = 0.25 + 0.45 * near; p.ring.material.rotation += raw * 0.6;
+      g.material.opacity = Math.min(1, 0.1 + 0.12 * pulse + 0.65 * near);
+      g.scale.setScalar(p.glint0 * (0.4 + 0.12 * pulse + 0.8 * near + 1.2 * p.dwell / DWELL));
+      p.ring.visible = near > 0.01; p.ring.material.opacity = 0.4 * near; p.ring.material.rotation += raw * 0.6;
       p.ring.scale.setScalar(p.glint0 * (1.6 + 0.2 * Math.sin(t * 1.7 + p.ph) + 1.2 * near - 0.8 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
     }
     stepFx(raw, t);
