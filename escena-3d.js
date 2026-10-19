@@ -101,6 +101,10 @@ function init(){
   controls.enablePan = false; controls.rotateSpeed = 0.55; controls.zoomSpeed = 0.7;
   controls.minDistance = 1.6; controls.maxDistance = 4.2;
   controls.minPolarAngle = 0.75; controls.maxPolarAngle = 2.2;
+  // home view: straight behind the astronaut, looking down the throat
+  const HOME = new THREE.Spherical(4.15, 1.24, 0);
+  function goHome(){ camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(HOME)); camera.lookAt(controls.target); controls.update(); }
+  goHome();
 
   const C = (hex) => new THREE.Color(hex).convertSRGBToLinear();
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -590,7 +594,7 @@ function init(){
   const MODE_Z = { swim: 0, dive: -1.4, brake: 0.3 };
   const MODE_LABEL = { swim: 'Nadando hacia la nave', reach: 'Estirándose hacia la nave', dive: 'Caída en picada', brake: 'Posición de frenado', brace: 'Se protege de un fragmento', grab: 'Intenta atrapar un fragmento' };
 
-  const anim = { mode: 'swim', modeT: reduceMotion ? 1e9 : 9, stroke: 0, reachT: 3, reachHold: 0, reach: 0, react: null, cool: 7,
+  const anim = { mode: 'swim', modeT: reduceMotion ? 1e9 : 9, stroke: 0, kick: 0, reachT: 3, reachHold: 0, reach: 0, react: null, cool: 7,
     hr: 92, hrT: 92, breath: 0, spin: 0, roll: 0, fx: 1, approach: 0, label: MODE_LABEL.swim,
     q: ROOT.swim.clone(), waist: spring3(V(0, 0, 0)) };
   astro.quaternion.copy(ROOT.swim);
@@ -605,36 +609,49 @@ function init(){
   const shoulderOf = (s) => arms.find((l) => l.s === s).up.g.position;
   function toShipFrom(origin, out){ chest.worldToLocal(out.copy(ship.position)); return out.sub(origin).normalize(); }
 
-  // front crawl: each arm pulls under the chest from overhead to the hip, then recovers wide over the back
+  // front crawl, as a competitive swimmer does it: long reach at entry, high-elbow catch (forearm vertical
+  // while the upper arm stays forward), pull under the chest, push past the hip, elbow-led exit and a
+  // relaxed high-elbow recovery with the forearm hanging. Arms half a cycle apart; six kicks per cycle.
+  // Directions are in chest space (+Y head, +Z belly / "water", +X the astronaut's left); x is mirrored per arm.
+  const CRAWL = [
+    { a: 0.0, u: [0.18, 1, 0.10], f: [0.15, 1, 0.12], c: 0.12, w: 0.05 },      // entry: fingertips first, arm long
+    { a: 0.6, u: [0.20, 0.97, 0.25], f: [0.12, 0.8, 0.6], c: 0.15, w: 0.2 },   // wrist flexes, catch begins
+    { a: 1.25, u: [0.28, 0.72, 0.64], f: [0.05, 0.05, 1.0], c: 0.18, w: 0.25 }, // high-elbow catch: forearm vertical
+    { a: 2.2, u: [0.32, -0.25, 0.92], f: [0.1, -0.75, 0.65], c: 0.18, w: 0.15 }, // pull under the chest
+    { a: 2.9, u: [0.25, -0.97, 0.05], f: [0.18, -0.98, -0.05], c: 0.2, w: -0.1 }, // push past the hip
+    { a: 3.6, u: [0.55, -0.6, -0.55], f: [0.25, -0.85, 0.45], c: 0.35, w: -0.05 }, // exit: the elbow leaves first
+    { a: 4.6, u: [0.8, 0.15, -0.58], f: [0.3, 0.1, 0.95], c: 0.4, w: 0.0 },     // recovery: elbow high, forearm hangs
+    { a: 5.6, u: [0.4, 0.85, -0.35], f: [0.2, 0.75, 0.6], c: 0.3, w: 0.0 },     // hand passes the shoulder, reaching
+    { a: Math.PI * 2, u: [0.18, 1, 0.10], f: [0.15, 1, 0.12], c: 0.12, w: 0.05 }
+  ];
+  function crawlKey(a, s, A){
+    let i = 0; while (i < CRAWL.length - 2 && a >= CRAWL[i + 1].a) i++;
+    const k0 = CRAWL[i], k1 = CRAWL[i + 1], e = smooth(0, 1, (a - k0.a) / (k1.a - k0.a));
+    A.u.set(s * lerp(k0.u[0], k1.u[0], e), lerp(k0.u[1], k1.u[1], e), lerp(k0.u[2], k1.u[2], e)).normalize();
+    A.f.set(s * lerp(k0.f[0], k1.f[0], e), lerp(k0.f[1], k1.f[1], e), lerp(k0.f[2], k1.f[2], e)).normalize();
+    A.c = lerp(k0.c, k1.c, e); A.w = lerp(k0.w, k1.w, e);
+  }
   function buildSwim(t, reach){
     const ph = anim.stroke;
     for (const s of [1, -1]){
       const a = (((ph + (s > 0 ? 0 : Math.PI)) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
       const A = swimPose.arm[s];
-      if (a < Math.PI){
-        const sa = Math.sin(a), ca = Math.cos(a);
-        A.u.set(s * 0.22, ca, sa * 0.85).normalize();
-        A.f.set(s * 0.12, ca - 0.35 * sa, sa * 1.1).normalize();
-        A.c = 0.22 + 0.12 * sa; A.w = 0.25;
-      } else {
-        const r = Math.sin(a - Math.PI), ca = Math.cos(a);
-        A.u.set(s * (0.22 + 0.75 * r), ca, -0.32 * r).normalize();
-        A.f.set(s * (0.15 + 0.5 * r), ca - 0.3 * r, -0.1 * r).normalize();
-        A.c = 0.4; A.w = 0.05;
-      }
+      crawlKey(a, s, A);
       if (reach > 0.001){
         toShipFrom(shoulderOf(s), _g);
         A.u.lerp(_g, reach).normalize(); A.f.lerp(_g, reach).normalize();
         A.c = lerp(A.c, 0, reach); A.w = lerp(A.w, -0.3, reach);
       }
-      const off = s > 0 ? 0 : Math.PI, kf = reach > 0.5 ? 6.5 : 4.4;
+      // six-beat flutter kick from the hip: legs long, the knee bends a little on the downbeat, toes pointed
+      const kp = anim.kick + (s > 0 ? 0 : Math.PI);
       const L = swimPose.leg[s];
-      L.u.set(s * 0.12, -1, 0.12 + 0.2 * Math.sin(t * kf + off)).normalize();
-      L.f.set(s * 0.08, -1, -0.04 + 0.16 * Math.sin(t * kf - 0.9 + off)).normalize();
-      L.w = 0.7;
+      L.u.set(s * 0.07, -1, 0.04 + 0.14 * Math.sin(kp)).normalize();
+      L.f.set(s * 0.05, -1, -0.03 + 0.26 * Math.sin(kp - 0.9)).normalize();
+      L.w = 0.85;
     }
-    swimPose.waist[0] = -0.08 - 0.08 * reach; swimPose.waist[1] = 0.12 * Math.sin(ph) * (1 - reach); swimPose.waist[2] = 0;
-    swimPose.k = reach > 0.5 ? 9 : 14;
+    // shoulders roll toward the pulling arm; the hips follow less (the waist carries the difference)
+    swimPose.waist[0] = -0.08 - 0.08 * reach; swimPose.waist[1] = -0.14 * Math.sin(ph - 0.4) * (1 - reach); swimPose.waist[2] = 0;
+    swimPose.k = reach > 0.5 ? 9 : 20;
     return swimPose;
   }
   function buildGrab(R, rel){
@@ -679,7 +696,9 @@ function init(){
     if (mode === 'swim' && !anim.react){ anim.reachT -= dt; if (anim.reachT <= 0){ anim.reachHold = 1.9; anim.reachT = 5 + rand() * 4; } }
     anim.reachHold = Math.max(0, anim.reachHold - dt);
     anim.reach += ((mode === 'swim' && anim.reachHold > 0 ? 1 : 0) - anim.reach) * Math.min(1, dt * 2.5);
-    anim.stroke += dt * (2.2 - 1.5 * anim.reach) * (mode === 'swim' ? 1 : 0.25);
+    const strokeRate = (3.0 - 2.2 * anim.reach) * (mode === 'swim' ? 1 : 0.25);
+    anim.stroke += dt * strokeRate;
+    anim.kick += dt * (mode === 'swim' ? Math.max(3 * strokeRate, 6) : 2);   // six-beat kick, kept going while reaching
 
     // debris: flinch from big pieces, try to catch small ones (only while swimming)
     if (mode === 'swim' && !anim.react && anim.cool <= 0 && anim.reach < 0.2){
@@ -732,7 +751,7 @@ function init(){
     anim.q.slerp(ROOT[mode], 1 - Math.exp(-dt * (mode === 'brake' ? 2.6 : mode === 'dive' ? 1.5 : 1.1)));
     if (mode === 'dive' && !reduceMotion) anim.spin += dt * 0.55;
     else { anim.spin = Math.atan2(Math.sin(anim.spin), Math.cos(anim.spin)); anim.spin *= Math.exp(-dt * 1.2); }
-    const rollT = mode === 'swim' ? 0.26 * Math.sin(anim.stroke + Math.PI / 2) * (1 - anim.reach) : 0;
+    const rollT = mode === 'swim' ? -0.5 * Math.sin(anim.stroke - 0.4) * (1 - anim.reach) : 0;   // about 30° of body roll, toward the pulling arm
     anim.roll += (rollT - anim.roll) * Math.min(1, dt * 4);
     const wv = anim.waist.x;
     _e.set(-0.25 * wv.x + drift(t * 0.3, 1.1) * 0.05, anim.roll + anim.spin - 0.35 * wv.y, -0.3 * wv.z + drift(t * 0.27, 2.6) * 0.05, 'XYZ');
@@ -1645,7 +1664,7 @@ function init(){
   let noteTimer = 0;
   function note(msg){ gyroNote.textContent = msg; gyroNote.hidden = false; clearTimeout(noteTimer); noteTimer = setTimeout(() => { gyroNote.hidden = true; }, 9000); }
   const BLOCKED = 'El visor donde se abre esta página bloquea los sensores de movimiento. Ábrela en tu propia web (con https) y el giroscopio funcionará.';
-  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v) setCine(false); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
+  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'gira tu celular' : 'arrastra para buscarlos'; btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
   async function askGyro(fromTap){
     if (needsAsk){
       try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted'){ if (fromTap) note('Permiso de movimiento denegado. Actívalo en Ajustes › Safari › Movimiento y orientación.'); return; } }
@@ -1659,7 +1678,17 @@ function init(){
     btnGyro.addEventListener('click', () => { if (gyro.on) setGyro(false); else askGyro(true); });
     if (policyBlocked){ btnGyro.textContent = 'Giroscopio no disponible'; setTimeout(() => note(BLOCKED), 1500); }
     else if (!needsAsk) askGyro(false);   // Android: on from the start
-    else renderer.domElement.addEventListener('touchend', function once(){ renderer.domElement.removeEventListener('touchend', once); if (!gyro.on) askGyro(true); });
+    else {
+      // iOS only grants motion access after a tap: a single tap anywhere asks, and the view stays put until then
+      controls.enableRotate = false;
+      if (MUI.hint) MUI.hint.textContent = 'toca para activar el giroscopio';
+      const once = () => {
+        removeEventListener('touchend', once); removeEventListener('click', once);
+        if (!gyro.on) askGyro(true).then(() => { if (!gyro.on){ controls.enableRotate = true; if (MUI.hint) MUI.hint.textContent = 'arrastra para buscarlos'; } });
+      };
+      addEventListener('touchend', once, { passive: true }); addEventListener('click', once);
+    }
+    if (!policyBlocked){ setCine(false); goHome(); }   // phones start centred and still, ready for the gyroscope
   }
   if (location.hash.indexOf('rendimiento') >= 0) $('perf-row').hidden = false;
 
