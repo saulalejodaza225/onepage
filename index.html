@@ -98,7 +98,23 @@
     #btn-estabilizar svg { width: 16px; height: 16px; flex: none; }
     #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 2px; }
     #moment-toast span { font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-text-main); }
-    @media (prefers-reduced-motion: reduce) { #moments-hud .dot { animation: none; } }
+    /* the five lights: orbs drawn over the 3D view, each one opens a hidden moment */
+    #lights { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+    .light { position: absolute; left: 0; top: 0; width: 48px; height: 48px; margin: -24px 0 0 -24px; padding: 0; border: 0; border-radius: 50%; background: radial-gradient(circle, rgba(5,7,13,0.5) 0%, rgba(5,7,13,0.22) 45%, rgba(5,7,13,0) 70%); cursor: pointer; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.6s ease, visibility 0s linear 0.6s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .light.on { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.6s ease, visibility 0s; }
+    .light::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; border: 1.5px solid var(--c); box-shadow: 0 0 10px var(--c), inset 0 0 6px var(--c); animation: lightRing 2.6s ease-out infinite; }
+    .light i { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #fff; box-shadow: 0 0 4px 1px #fff, 0 0 10px 3px var(--c), 0 0 22px 7px var(--c); transform: scale(calc(1 + var(--k, 0) * 1.1)); transition: transform 0.15s linear; animation: lightCore 2.6s ease-in-out infinite; }
+    .light.flare i { box-shadow: 0 0 6px 2px #fff, 0 0 16px 6px var(--c), 0 0 34px 12px var(--c); }
+    .light:hover::before, .light:focus-visible::before { border-width: 2px; }
+    .light:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+    @keyframes lightRing { 0% { transform: scale(0.5); opacity: 0.95; } 100% { transform: scale(1.3); opacity: 0; } }
+    @keyframes lightCore { 50% { opacity: 0.75; } }
+    /* the guide that points at a light until people find a few */
+    #light-hint { position: absolute; left: 50%; top: 30%; z-index: 3; padding: 6px 12px; border-radius: 14px; background: rgba(5,7,13,0.72); border: 1px solid rgba(92,225,255,0.55); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: var(--color-text-main); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em; white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, calc(-100% - 26px)); transition: opacity 0.4s ease; box-shadow: 0 0 14px rgba(92,225,255,0.25); }
+    #light-hint::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px; margin-left: -5px; background: inherit; border-right: 1px solid rgba(92,225,255,0.55); border-bottom: 1px solid rgba(92,225,255,0.55); transform: rotate(45deg); }
+    #light-hint.show { opacity: 1; animation: hintBob 1.6s ease-in-out infinite; }
+    @keyframes hintBob { 50% { margin-top: -5px; } }
+    @media (prefers-reduced-motion: reduce) { #moments-hud .dot, #light-hint.show, .light::before, .light i { animation: none; } }
     #btn-gyro, #btn-pause, #btn-hud, #btn-cine, #speed, #speed-out { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
     #loader.done { visibility: hidden; }
     .content-container .button-wrapper { pointer-events: auto; }
@@ -278,6 +294,8 @@
       <p id="gyro-note" role="status" hidden></p>
       <div id="moments-hud"><span class="dot" aria-hidden="true"></span>Hay momentos ocultos · <span id="moments-hint">gira tu celular</span></div>
       <div id="moment-toast" role="status" hidden><strong></strong><span></span></div>
+      <div id="lights" role="group" aria-label="Momentos ocultos"></div>
+      <div id="light-hint" aria-hidden="true">toca la luz</div>
       <button id="btn-estabilizar" type="button" aria-label="Estabilizar la cámara y recuperar el control">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
         Estabilizar
