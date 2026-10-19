@@ -221,6 +221,38 @@
       box-shadow: none;
       cursor: not-allowed;
     }
+    /* Cuestionario: reemplaza el título y el botón cuando se presiona "Conoce tu negocio". */
+    .quiz { pointer-events: auto; display: flex; flex-direction: column; gap: 12px; max-height: min(68dvh, 560px); overflow-y: auto; overscroll-behavior: contain; padding: 18px 16px 16px; border-radius: 18px; background: rgba(5,7,13,0.74); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); animation: quizIn 0.35s ease both; }
+    .quiz[hidden], .text-block[hidden], .button-wrapper[hidden] { display: none; }
+    @keyframes quizIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .quiz-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .quiz-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent-cyan); }
+    .quiz-back { min-width: 44px; min-height: 44px; margin: -10px -8px -10px 0; border: none; background: none; color: var(--color-text-muted); font-family: var(--font-mono); font-size: 12px; cursor: pointer; }
+    .quiz-back:hover { color: var(--color-text-main); }
+    .quiz-bar { height: 2px; border-radius: 2px; background: rgba(92,225,255,0.15); overflow: hidden; }
+    .quiz-bar span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--color-accent-cyan), #3B82F6); transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+    .quiz-count { font-size: 11px; letter-spacing: 0.08em; color: var(--color-text-muted); }
+    .quiz-q { font-family: var(--font-title); font-weight: 400; font-size: clamp(16px, 4.6vw, 20px); line-height: 1.35; letter-spacing: 0.02em; }
+    .quiz-q[hidden] { display: none; }
+    .quiz-q:focus, .quiz-r-name:focus { outline: none; }
+    .quiz-options { display: grid; gap: 8px; }
+    .quiz-options[hidden] { display: none; }
+    .quiz-options button { min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(92,225,255,0.28); background: rgba(13,20,36,0.6); color: var(--color-text-main); font-family: var(--font-mono); font-size: 13.5px; line-height: 1.35; text-align: left; cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.12s; touch-action: manipulation; }
+    .quiz-options button:hover { border-color: var(--color-accent-cyan); background: rgba(92,225,255,0.08); }
+    .quiz-options button:active { transform: scale(0.98); }
+    .quiz-options button:focus-visible, .quiz-back:focus-visible, .quiz-actions a:focus-visible, .quiz-actions button:focus-visible { outline: 2px solid var(--color-accent-cyan); outline-offset: 2px; }
+    .quiz-result { display: flex; flex-direction: column; gap: 6px; }
+    .quiz-result[hidden] { display: none; }
+    .quiz-r-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent-cyan); }
+    .quiz-r-name { font-family: var(--font-title); font-weight: 400; font-size: clamp(20px, 6vw, 26px); line-height: 1.2; letter-spacing: 0.04em; text-transform: uppercase; }
+    .quiz-r-price { font-size: 24px; font-weight: 600; color: var(--color-accent-cyan); }
+    .quiz-r-time { font-size: 12px; color: var(--color-text-muted); }
+    .quiz-r-text { font-size: 13.5px; line-height: 1.5; color: var(--color-text-main); }
+    .quiz-actions { display: grid; gap: 8px; margin-top: 8px; }
+    .quiz-actions a, .quiz-actions button { min-height: 48px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-btn); font-family: var(--font-mono); font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
+    .quiz-demo { background: linear-gradient(135deg, var(--color-accent-cyan) 0%, #3B82F6 100%); color: var(--color-text-btn); border: none; box-shadow: 0 4px 20px rgba(92,225,255,0.22); }
+    .quiz-restart { background: rgba(13,20,36,0.6); color: var(--color-text-main); border: 1px solid rgba(92,225,255,0.28); }
+    @media (prefers-reduced-motion: reduce) { .quiz { animation: none; } }
   </style>
 </head>
 <body>
@@ -259,6 +291,29 @@
           Conoce tu negocio
         </button>
       </div>
+
+      <!-- 4. Cuestionario: aparece al presionar "Conoce tu negocio" -->
+      <div class="quiz" id="quiz" role="region" aria-labelledby="quiz-q" hidden>
+        <div class="quiz-top">
+          <span class="quiz-eyebrow">Tu página ideal · 5 preguntas</span>
+          <button type="button" class="quiz-back" aria-label="Volver al inicio">← Volver</button>
+        </div>
+        <div class="quiz-bar" aria-hidden="true"><span></span></div>
+        <p class="quiz-count" aria-live="polite"></p>
+        <h2 class="quiz-q" id="quiz-q" tabindex="-1"></h2>
+        <div class="quiz-options"></div>
+        <div class="quiz-result" aria-live="polite" hidden>
+          <p class="quiz-r-label">Te recomendamos</p>
+          <h2 class="quiz-r-name" tabindex="-1"></h2>
+          <p class="quiz-r-price"></p>
+          <p class="quiz-r-time"></p>
+          <p class="quiz-r-text"></p>
+          <div class="quiz-actions">
+            <a class="quiz-demo" href="#" target="_blank" rel="noopener">Ver demo</a>
+            <button type="button" class="quiz-restart">Volver a empezar</button>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -272,5 +327,107 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
   <script src="escena-3d.js"></script>
+  <script>
+    // Cuestionario: 5 preguntas; cada respuesta suma puntos a los cuatro modelos
+    // (L = Landing, P = PYME, E = Empresarial, T = Tienda). Gana el de más puntos;
+    // en empate, el primero de la lista. Mismas preguntas, precios y demos que el sitio.
+    (function () {
+      var PREGUNTAS = [
+        { q: '¿Qué tiene hoy tu negocio en línea?', o: [
+          { t: 'Nada todavía', p: { L: 2 } },
+          { t: 'Redes sociales o una página básica', p: { P: 2 } },
+          { t: 'Un catálogo amplio de productos o servicios', p: { E: 2 } },
+          { t: 'Quiero vender y cobrar en línea', p: { T: 2 } }
+        ] },
+        { q: '¿Quién actualizará el contenido?', o: [
+          { t: 'Yo, sin depender de nadie', p: { P: 2, E: 1 } },
+          { t: 'Un equipo con varias personas', p: { E: 2 } },
+          { t: 'Casi nunca cambiará, quiero una presencia fija', p: { L: 2 } },
+          { t: 'Inventario y pedidos al día', p: { T: 2 } }
+        ] },
+        { q: '¿Cuántos productos o servicios quieres mostrar?', o: [
+          { t: 'Uno o pocos (hasta 4 bloques)', p: { L: 2 } },
+          { t: 'Entre 5 y 20', p: { P: 2 } },
+          { t: 'Más de 20', p: { E: 1, T: 2 } }
+        ] },
+        { q: '¿Necesitas cobrar en línea con pasarela de pago?', o: [
+          { t: 'No', p: { L: 1, P: 1, E: 1 } },
+          { t: 'Sí, con Wompi, PayU o PSE', p: { T: 3 } },
+          { t: 'Por ahora no, pero lo planeo', p: { P: 1, E: 1 } }
+        ] },
+        { q: '¿Para cuándo necesitas tu página lista?', o: [
+          { t: 'Lo antes posible (menos de una semana)', p: { L: 2 } },
+          { t: 'En un par de semanas', p: { P: 1, E: 1 } },
+          { t: 'Tengo tiempo para un proyecto completo', p: { E: 2, T: 1 } }
+        ] }
+      ];
+      var MODELOS = {
+        L: { nombre: 'Landing Page', precio: '$675.000', entrega: 'Entrega: 5 días', demo: 'https://landing-page-demo-ruby.vercel.app/',
+             texto: 'Ideal para un negocio que hoy no tiene nada en línea y quiere empezar a recibir clientes.' },
+        P: { nombre: 'Página PYME', precio: '$1.080.000', entrega: 'Entrega: 8 días', demo: 'https://modelo-pyme-demo.vercel.app/',
+             texto: 'Ideal para un negocio que quiere poder actualizar su propia web sin depender de terceros.' },
+        E: { nombre: 'Página Empresarial', precio: '$1.620.000', entrega: 'Entrega: 12 días', demo: 'https://dise-o-empresarial-demo.vercel.app/',
+             texto: 'Ideal para un negocio que necesita mostrar un catálogo amplio de productos o servicios con prestancia.' },
+        T: { nombre: 'Tienda Online', precio: '$2.160.000', entrega: 'Entrega: 15 días', demo: 'https://e-store-demo1.vercel.app/',
+             texto: 'Ideal para un negocio que quiere vender y cobrar en línea directamente con pasarela de pagos.' }
+      };
+      var ORDEN = ['L', 'P', 'E', 'T'];
+
+      var cta = document.getElementById('cta-button');
+      var textos = document.querySelector('.text-block'), botonera = document.querySelector('.button-wrapper');
+      var quiz = document.getElementById('quiz');
+      var barra = quiz.querySelector('.quiz-bar span'), contador = quiz.querySelector('.quiz-count'), pregunta = quiz.querySelector('.quiz-q');
+      var opciones = quiz.querySelector('.quiz-options'), resultado = quiz.querySelector('.quiz-result');
+      var paso = 0, puntos = { L: 0, P: 0, E: 0, T: 0 };
+
+      function mostrarPaso() {
+        var p = PREGUNTAS[paso];
+        contador.textContent = 'Pregunta ' + (paso + 1) + ' de ' + PREGUNTAS.length;
+        barra.style.width = (paso / PREGUNTAS.length * 100) + '%';
+        pregunta.textContent = p.q; pregunta.hidden = false;
+        opciones.innerHTML = '';
+        p.o.forEach(function (op) {
+          var b = document.createElement('button');
+          b.type = 'button'; b.textContent = op.t;
+          b.addEventListener('click', function () { responder(op.p); });
+          opciones.appendChild(b);
+        });
+        opciones.hidden = false; resultado.hidden = true;
+        pregunta.focus({ preventScroll: true });
+      }
+      function responder(suma) {
+        Object.keys(suma).forEach(function (k) { puntos[k] += suma[k]; });
+        paso++;
+        if (paso < PREGUNTAS.length) mostrarPaso(); else mostrarResultado();
+      }
+      function mostrarResultado() {
+        var mejor = ORDEN[0];
+        ORDEN.forEach(function (k) { if (puntos[k] > puntos[mejor]) mejor = k; });
+        var m = MODELOS[mejor];
+        contador.textContent = 'Tu resultado';
+        barra.style.width = '100%';
+        pregunta.hidden = true; opciones.hidden = true; opciones.innerHTML = '';
+        quiz.querySelector('.quiz-r-name').textContent = m.nombre;
+        quiz.querySelector('.quiz-r-price').textContent = m.precio;
+        quiz.querySelector('.quiz-r-time').textContent = m.entrega;
+        quiz.querySelector('.quiz-r-text').textContent = m.texto;
+        var demo = quiz.querySelector('.quiz-demo');
+        demo.href = m.demo; demo.setAttribute('aria-label', 'Ver demo de ' + m.nombre + ' (se abre en una pestaña nueva)');
+        resultado.hidden = false;
+        quiz.querySelector('.quiz-r-name').focus({ preventScroll: true });
+      }
+      function empezar() { paso = 0; puntos = { L: 0, P: 0, E: 0, T: 0 }; quiz.scrollTop = 0; mostrarPaso(); }
+
+      cta.addEventListener('click', function () {
+        textos.hidden = true; botonera.hidden = true; quiz.hidden = false;
+        empezar();
+      });
+      quiz.querySelector('.quiz-restart').addEventListener('click', empezar);
+      quiz.querySelector('.quiz-back').addEventListener('click', function () {
+        quiz.hidden = true; textos.hidden = false; botonera.hidden = false;
+        cta.focus({ preventScroll: true });
+      });
+    })();
+  </script>
 </body>
 </html>
