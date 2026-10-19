@@ -1164,7 +1164,7 @@ function init(){
     if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
     _ge.setFromQuaternion(gyro.cur, 'YXZ');
     // 1:1 mapping: turning the phone by X degrees turns the view by X degrees
-    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x, 0.3, 2.85), gyro.cal.theta - _ge.y);
+    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x, 0.3, 2.85), gyro.cal.theta + _ge.y);
     camera.position.copy(controls.target).add(off.setFromSpherical(gsph));
     camera.lookAt(controls.target);
   }
