@@ -306,6 +306,11 @@
     .quiz-field input:focus-visible { outline: 2px solid var(--color-accent-cyan); outline-offset: 2px; }
     .quiz-co-error { font-size: 12px; line-height: 1.5; color: #ff8a9b; }
     .quiz-co-note { font-size: 11.5px; line-height: 1.5; color: var(--color-text-muted); }
+    .quiz-paquete { display: grid; gap: 10px; margin: 0; min-width: 0; padding: 12px 14px; border: 1px solid rgba(92,225,255,0.2); border-radius: 12px; }
+    .quiz-paquete legend { padding: 0 6px; }
+    .quiz-paquete a { color: var(--color-accent-cyan); }
+    .quiz-check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; font-size: 12.5px; line-height: 1.45; cursor: pointer; }
+    .quiz-check input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--color-accent-cyan); }
     .quiz-restart { background: rgba(13,20,36,0.6); color: var(--color-text-main); border: 1px solid rgba(92,225,255,0.28); }
     @media (prefers-reduced-motion: reduce) { .quiz { animation: none; } }
   </style>
@@ -385,6 +390,18 @@
           <label class="quiz-field">Correo electrónico
             <input name="correo" type="email" autocomplete="email" maxlength="160" required>
           </label>
+          <fieldset class="quiz-paquete">
+            <legend class="quiz-r-label">Paquete de bienvenida</legend>
+            <p class="quiz-co-note">Después de tu pago te enviamos a tu correo el contrato que nos vincula, la cuenta de cobro y los pasos siguientes. <a href="paquete/documentos/01-contrato.pdf" target="_blank" rel="noopener">Leer el modelo del contrato</a></p>
+            <label class="quiz-check">
+              <input type="checkbox" name="aceptaPaquete" required>
+              <span>Acepto el contrato y que me envíen el paquete de bienvenida a mi correo.</span>
+            </label>
+            <label class="quiz-check">
+              <input type="checkbox" name="instrucciones">
+              <span>Quiero también el paquete de instrucciones y una encuesta de satisfacción (opcional).</span>
+            </label>
+          </fieldset>
           <p class="quiz-co-error" role="alert" hidden></p>
           <div class="quiz-actions">
             <button type="submit" class="quiz-buy">Pagar con Wompi</button>
@@ -536,11 +553,21 @@
           mostrarErrorCompra('Escribe tu nombre y un correo válido.');
           return;
         }
+        if (!form.elements.aceptaPaquete.checked) {
+          mostrarErrorCompra('Acepta el paquete de bienvenida para continuar.');
+          return;
+        }
         formError.hidden = true; formBtn.disabled = true; formBtn.textContent = 'Conectando con Wompi…';
         fetch('/api/wompi/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan: seleccion, nombre: nombre, correo: correo })
+          body: JSON.stringify({
+            plan: seleccion,
+            nombre: nombre,
+            correo: correo,
+            aceptaPaquete: form.elements.aceptaPaquete.checked,
+            instrucciones: form.elements.instrucciones.checked
+          })
         }).then(function (r) {
           return r.json().catch(function () { return {}; }).then(function (datos) {
             if (!r.ok) throw new Error(datos.error || 'No pudimos iniciar el pago. Intenta de nuevo.');

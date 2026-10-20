@@ -2,6 +2,7 @@
 // Solo se acepta si el checksum del evento coincide con el secreto de eventos.
 const { configuracion, eventoAutentico } = require('../../lib/wompi');
 const { leerJson, enviarJson } = require('../../lib/http');
+const { entregarPaquete } = require('../../lib/entrega');
 
 module.exports = async function webhook(req, res) {
   if (req.method !== 'POST') return enviarJson(res, 405, { error: 'Método no permitido.' });
@@ -14,5 +15,9 @@ module.exports = async function webhook(req, res) {
 
   const transaccion = evento.data && evento.data.transaction;
   if (transaccion) console.log(`[wompi] ${evento.event} ${transaccion.reference} ${transaccion.status}`);
+  if (transaccion && transaccion.status === 'APPROVED') {
+    // No devolvemos error: un reintento de Wompi podría enviar el paquete dos veces. Los fallos quedan en los logs.
+    await entregarPaquete(transaccion).catch(err => console.error('[paquete] error:', err.message));
+  }
   return enviarJson(res, 200, { ok: true });
 };

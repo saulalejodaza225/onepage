@@ -19,10 +19,11 @@ const TIPOS = {
   '.glb': 'model/gltf-binary',
   '.gltf': 'model/gltf+json',
   '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2'
+  '.woff2': 'font/woff2',
+  '.pdf': 'application/pdf'
 };
 const NO_SERVIBLES = ['server.js', 'package.json', 'README.md'];
-const CARPETAS_PRIVADAS = ['api', 'lib', 'node_modules'];
+const CARPETAS_PRIVADAS = ['api', 'lib', 'scripts', 'node_modules'];
 
 function cargarEnv() {
   const archivo = path.join(RAIZ, '.env');

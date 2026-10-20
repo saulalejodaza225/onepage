@@ -1,0 +1,9 @@
+{
+  "nombre": "[Nombre completo o razón social del proveedor]",
+  "documento": "[CC o NIT del proveedor]",
+  "ciudad": "[Ciudad]",
+  "direccion": "[Dirección]",
+  "correo": "[Correo de contacto]",
+  "telefono": "[Teléfono]",
+  "marca": "Arquitectura digital"
+}

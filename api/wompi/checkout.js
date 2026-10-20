@@ -1,6 +1,7 @@
 // POST /api/wompi/checkout: valida el pedido, fija el precio en el servidor y devuelve la URL de pago de Wompi.
 const { PLANES, configuracion, crearReferencia, urlCheckout } = require('../../lib/wompi');
 const { leerJson, enviarJson } = require('../../lib/http');
+const { VERSION_PAQUETE } = require('../../lib/paquete');
 
 const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -27,12 +28,18 @@ module.exports = async function checkout(req, res) {
   if (nombre.length < 3 || nombre.length > 120) return enviarJson(res, 400, { error: 'Escribe tu nombre completo.' });
   if (correo.length > 160 || !CORREO.test(correo)) return enviarJson(res, 400, { error: 'Escribe un correo válido.' });
 
+  if (datos.aceptaPaquete !== true) return enviarJson(res, 400, { error: 'Acepta el paquete de bienvenida para continuar.' });
+  const instrucciones = datos.instrucciones === true;
+
+  const referencia = crearReferencia(clave, instrucciones);
   const url = urlCheckout(cfg, {
-    referencia: crearReferencia(clave),
+    referencia,
     montoCentavos: PLANES[clave].precioCOP * 100,
     nombre,
     correo,
     redirectUrl: `${urlPublica(req, cfg)}/pago-resultado.html`
   });
+  // Registro de la aceptación: queda ligada a la referencia del pago.
+  console.log('[consentimiento]', JSON.stringify({ referencia, correo, instrucciones, version: VERSION_PAQUETE, fecha: new Date().toISOString() }));
   return enviarJson(res, 200, { checkoutUrl: url });
 };
