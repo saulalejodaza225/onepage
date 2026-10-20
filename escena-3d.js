@@ -1186,7 +1186,7 @@ function init(){
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
   const GYRO_GAIN = 2.4;
-  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null };
+  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null, home: null };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
   function onTilt(e){
@@ -1208,7 +1208,7 @@ function init(){
     // short exponential smoothing in quaternion space (about 50 ms): removes jitter, keeps the response tight
     gyro.cur.slerp(gyro.rel, 1 - Math.exp(-raw * 14));   // a touch more smoothing, since the movement is amplified
     // the orbit pose at calibration is the reference; the phone's rotation is applied on top of it
-    if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
+    if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; gyro.home = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
     _ge.setFromQuaternion(gyro.cur, 'YXZ');
     // amplified: turning the phone by X degrees turns the view by about 2.4X, so a small tilt is enough
     gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x * GYRO_GAIN, 0.3, 2.85), gyro.cal.theta + _ge.y * GYRO_GAIN);
@@ -3925,6 +3925,16 @@ function init(){
     else camera.position.copy(controls.target).add(_fv.setFromSphericalCoords(focus.r, ph, th));
     if (focus.t >= focus.d) focus = null;
   }
+  // when an event ends the view glides back to the home view. With the gyroscope the home view is the phone's normal position:
+  // put the phone upright and you are looking at the view you started from, ready for the next light
+  function unfocus(){
+    if (gyro.on && gyro.cal && gyro.home){
+      focus = { t: 0, d: 1.3, gy: true, p0: gyro.cal.phi, t0: gyro.cal.theta, p1: gyro.home.phi, t1: gyro.cal.theta + wrapA(gyro.home.theta - gyro.cal.theta) };
+    } else {
+      _fs.setFromVector3(_fv.copy(camera.position).sub(controls.target));
+      focus = { t: 0, d: 1.3, gy: false, r: HOME.radius, p0: _fs.phi, t0: _fs.theta, p1: HOME.phi, t1: _fs.theta + wrapA(HOME.theta - _fs.theta) };
+    }
+  }
   function playPoint(p, idx){
     const i = idx != null ? idx : p.first ? 0 : nextIndex(p), def = p.defs[i];
     p.first = false;
@@ -4021,7 +4031,7 @@ function init(){
         p.ring.visible = false;
         p.time += raw;
         try { p.cur.inst.update(p.time, raw, t); const fx = ENVFX[p.cur.name]; if (fx) fx(p.time, raw, t, p); } catch (err){ console.error(err); p.time = p.cur.dur; }
-        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; if (cineBack){ cineBack = false; setCine(true); } }
+        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; unfocus(); if (cineBack){ cineBack = false; setCine(true); } }
         continue;
       }
       if (p.state === 'spent'){ p.glint.visible = p.ring.visible = false; continue; }
