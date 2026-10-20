@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Estado de tu pago</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Michroma&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --color-bg: #05070D;
+      --color-text-main: #F4F6F9;
+      --color-text-muted: #8E9BAE;
+      --color-accent-cyan: #5CE1FF;
+      --color-border-subtle: rgba(92, 225, 255, 0.15);
+      --font-title: 'Michroma', sans-serif;
+      --font-mono: 'IBM Plex Mono', monospace;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+      background: var(--color-bg);
+      color: var(--color-text-main);
+      font-family: var(--font-mono);
+      -webkit-font-smoothing: antialiased;
+    }
+    main {
+      width: 100%;
+      max-width: 430px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 22px 18px;
+      border-radius: 18px;
+      background: rgba(5, 7, 13, 0.74);
+      border: 1px solid var(--color-border-subtle);
+    }
+    .eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent-cyan); }
+    h1 { font-family: var(--font-title); font-weight: 400; font-size: clamp(20px, 6vw, 26px); line-height: 1.2; letter-spacing: 0.04em; text-transform: uppercase; }
+    p { font-size: 13.5px; line-height: 1.5; }
+    .datos { font-size: 12px; color: var(--color-text-muted); word-break: break-word; }
+    .datos[hidden] { display: none; }
+    .volver {
+      margin-top: 8px;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--color-accent-cyan) 0%, #3B82F6 100%);
+      color: #05070D;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+    .volver:focus-visible { outline: 2px solid var(--color-accent-cyan); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Tu compra</p>
+    <h1 id="estado">Confirmando tu pago…</h1>
+    <p id="detalle"></p>
+    <p class="datos" id="datos" hidden></p>
+    <a class="volver" href="index.html">Volver al inicio</a>
+  </main>
+  <script>
+    (function () {
+      var ESTADOS = {
+        APPROVED: ['Pago aprobado', 'Recibimos tu pago. Guarda tu número de referencia para cualquier consulta.'],
+        DECLINED: ['Pago rechazado', 'Tu banco o medio de pago no aprobó la transacción. Puedes intentarlo de nuevo.'],
+        VOIDED: ['Pago anulado', 'La transacción fue anulada.'],
+        ERROR: ['Error en el pago', 'Ocurrió un problema al procesar el pago. Intenta de nuevo.'],
+        PENDING: ['Pago en proceso', 'Tu pago aún se está confirmando. Recarga esta página en unos minutos.']
+      };
+      var estado = document.getElementById('estado'), detalle = document.getElementById('detalle'), datos = document.getElementById('datos');
+      function mostrar(titulo, texto) { estado.textContent = titulo; detalle.textContent = texto; }
+
+      var id = new URLSearchParams(location.search).get('id');
+      if (!id) {
+        mostrar('No encontramos tu pago', 'Si ya realizaste un pago, guarda el comprobante que muestre Wompi.');
+        return;
+      }
+
+      fetch('/api/wompi/transaction?id=' + encodeURIComponent(id))
+        .then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (json) {
+            if (!r.ok) throw new Error(json.error || 'Sin respuesta');
+            return json;
+          });
+        })
+        .then(function (tx) {
+          var e = ESTADOS[tx.status] || ['Estado desconocido', 'Aún no podemos confirmar el estado de tu pago.'];
+          mostrar(e[0], e[1]);
+          datos.textContent = 'Referencia: ' + tx.reference + ' · Monto: $' + Number(tx.amount).toLocaleString('es-CO') + ' ' + tx.currency;
+          datos.hidden = false;
+        })
+        .catch(function () {
+          mostrar('No pudimos confirmar tu pago', 'Recarga esta página en unos minutos. Si ya pagaste, guarda el comprobante que muestre Wompi.');
+        });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "onepage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Página de presentación con cuestionario y compra de modelos web con pagos Wompi",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

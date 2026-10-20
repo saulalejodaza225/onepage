@@ -295,7 +295,17 @@
     .quiz-r-text { font-size: 13.5px; line-height: 1.5; color: var(--color-text-main); }
     .quiz-actions { display: grid; gap: 8px; margin-top: 8px; }
     .quiz-actions a, .quiz-actions button { min-height: 48px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-btn); font-family: var(--font-mono); font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
-    .quiz-demo { background: linear-gradient(135deg, var(--color-accent-cyan) 0%, #3B82F6 100%); color: var(--color-text-btn); border: none; box-shadow: 0 4px 20px rgba(92,225,255,0.22); }
+    .quiz-buy { background: linear-gradient(135deg, var(--color-accent-cyan) 0%, #3B82F6 100%); color: var(--color-text-btn); border: none; box-shadow: 0 4px 20px rgba(92,225,255,0.22); }
+    .quiz-buy:disabled { opacity: 0.6; cursor: progress; }
+    .quiz-demo, .quiz-co-back { background: rgba(13,20,36,0.6); color: var(--color-text-main); border: 1px solid rgba(92,225,255,0.28); }
+    .quiz-checkout { display: flex; flex-direction: column; gap: 10px; }
+    .quiz-checkout[hidden], .quiz-co-error[hidden] { display: none; }
+    .quiz-co-summary { font-size: 13px; line-height: 1.4; }
+    .quiz-field { display: grid; gap: 6px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-muted); }
+    .quiz-field input { min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(92,225,255,0.28); background: rgba(13,20,36,0.6); color: var(--color-text-main); font-family: var(--font-mono); font-size: 16px; }
+    .quiz-field input:focus-visible { outline: 2px solid var(--color-accent-cyan); outline-offset: 2px; }
+    .quiz-co-error { font-size: 12px; line-height: 1.5; color: #ff8a9b; }
+    .quiz-co-note { font-size: 11.5px; line-height: 1.5; color: var(--color-text-muted); }
     .quiz-restart { background: rgba(13,20,36,0.6); color: var(--color-text-main); border: 1px solid rgba(92,225,255,0.28); }
     @media (prefers-reduced-motion: reduce) { .quiz { animation: none; } }
   </style>
@@ -360,10 +370,28 @@
           <p class="quiz-r-time"></p>
           <p class="quiz-r-text"></p>
           <div class="quiz-actions">
+            <button type="button" class="quiz-buy">Comprar este modelo</button>
             <a class="quiz-demo" href="#" target="_blank" rel="noopener">Ver demo</a>
             <button type="button" class="quiz-restart">Volver a empezar</button>
           </div>
         </div>
+        <!-- Datos del comprador: el precio lo fija el servidor, no este formulario -->
+        <form class="quiz-checkout" id="checkout" novalidate hidden>
+          <p class="quiz-r-label">Datos para tu compra</p>
+          <p class="quiz-co-summary"></p>
+          <label class="quiz-field">Nombre completo
+            <input name="nombre" type="text" autocomplete="name" maxlength="120" required>
+          </label>
+          <label class="quiz-field">Correo electrónico
+            <input name="correo" type="email" autocomplete="email" maxlength="160" required>
+          </label>
+          <p class="quiz-co-error" role="alert" hidden></p>
+          <div class="quiz-actions">
+            <button type="submit" class="quiz-buy">Pagar con Wompi</button>
+            <button type="button" class="quiz-co-back">Volver al resultado</button>
+          </div>
+          <p class="quiz-co-note">El pago lo procesa Wompi en su página segura. Los datos de tu tarjeta o cuenta no pasan por este sitio.</p>
+        </form>
       </div>
     </section>
   </main>
@@ -432,7 +460,8 @@
       var quiz = document.getElementById('quiz');
       var barra = quiz.querySelector('.quiz-bar span'), contador = quiz.querySelector('.quiz-count'), pregunta = quiz.querySelector('.quiz-q');
       var opciones = quiz.querySelector('.quiz-options'), resultado = quiz.querySelector('.quiz-result');
-      var paso = 0, puntos = { L: 0, P: 0, E: 0, T: 0 }, iniciado = false, terminado = false;
+      var form = quiz.querySelector('.quiz-checkout'), formError = form.querySelector('.quiz-co-error'), formBtn = form.querySelector('button[type="submit"]');
+      var paso = 0, puntos = { L: 0, P: 0, E: 0, T: 0 }, iniciado = false, terminado = false, seleccion = ORDEN[0];
 
       function mostrarPaso() {
         var p = PREGUNTAS[paso];
@@ -446,7 +475,7 @@
           b.addEventListener('click', function () { responder(op.p); });
           opciones.appendChild(b);
         });
-        opciones.hidden = false; resultado.hidden = true;
+        opciones.hidden = false; resultado.hidden = true; form.hidden = true; formError.hidden = true;
         pregunta.focus({ preventScroll: true });
       }
       function responder(suma) {
@@ -457,6 +486,7 @@
       function mostrarResultado() {
         var mejor = ORDEN[0];
         ORDEN.forEach(function (k) { if (puntos[k] > puntos[mejor]) mejor = k; });
+        seleccion = mejor;
         var m = MODELOS[mejor];
         contador.textContent = 'Tu resultado';
         barra.style.width = '100%';
@@ -471,10 +501,21 @@
         quiz.querySelector('.quiz-r-name').focus({ preventScroll: true });
       }
       function empezar() { paso = 0; puntos = { L: 0, P: 0, E: 0, T: 0 }; iniciado = true; terminado = false; quiz.scrollTop = 0; mostrarPaso(); }
+      function mostrarCompra() {
+        var m = MODELOS[seleccion];
+        form.querySelector('.quiz-co-summary').textContent = m.nombre + ' · ' + m.precio + ' COP';
+        formError.hidden = true;
+        resultado.hidden = true; form.hidden = false;
+        form.elements.nombre.focus({ preventScroll: true });
+      }
+      function mostrarErrorCompra(texto) {
+        formError.textContent = texto; formError.hidden = false;
+        formBtn.disabled = false; formBtn.textContent = 'Pagar con Wompi';
+      }
 
       cta.addEventListener('click', function () {
         textos.hidden = true; botonera.hidden = true; quiz.hidden = false;
-        if (terminado) quiz.querySelector('.quiz-r-name').focus({ preventScroll: true });   // the result is still there
+        if (terminado) (form.hidden ? quiz.querySelector('.quiz-r-name') : form.elements.nombre).focus({ preventScroll: true });   // the result, or the form, is still there
         else if (iniciado) pregunta.focus({ preventScroll: true });   // back to the same question
         else empezar();
       });
@@ -482,6 +523,38 @@
       quiz.querySelector('.quiz-back').addEventListener('click', function () {   // minimise only, nothing is lost
         quiz.hidden = true; textos.hidden = false; botonera.hidden = false;
         cta.focus({ preventScroll: true });
+      });
+      resultado.querySelector('.quiz-buy').addEventListener('click', mostrarCompra);
+      form.querySelector('.quiz-co-back').addEventListener('click', function () {
+        form.hidden = true; resultado.hidden = false;
+        resultado.querySelector('.quiz-buy').focus({ preventScroll: true });
+      });
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var nombre = form.elements.nombre.value.trim(), correo = form.elements.correo.value.trim();
+        if (!nombre || !form.elements.correo.checkValidity()) {
+          mostrarErrorCompra('Escribe tu nombre y un correo válido.');
+          return;
+        }
+        formError.hidden = true; formBtn.disabled = true; formBtn.textContent = 'Conectando con Wompi…';
+        fetch('/api/wompi/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: seleccion, nombre: nombre, correo: correo })
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (datos) {
+            if (!r.ok) throw new Error(datos.error || 'No pudimos iniciar el pago. Intenta de nuevo.');
+            return datos;
+          });
+        }).then(function (datos) {
+          window.location.href = datos.checkoutUrl;
+        }).catch(function (err) {
+          mostrarErrorCompra(err.name === 'TypeError' ? 'Sin conexión con el servidor de pagos. Intenta de nuevo.' : err.message);
+        });
+      });
+      // Al volver con el botón "atrás" del navegador, el botón de pago no debe quedar bloqueado
+      window.addEventListener('pageshow', function (e) {
+        if (e.persisted) { formBtn.disabled = false; formBtn.textContent = 'Pagar con Wompi'; }
       });
     })();
   </script>
