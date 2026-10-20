@@ -3840,8 +3840,8 @@ function init(){
   const RING_X = 32, RING_Y = 22, RING_LIFT = 12, RING_AT = [18, 90, 162, 234, 306];   // degrees: the ellipse, the aim's height, where each light sits
   const ringPoint = (k) => { const a = D2R(RING_AT[k]); return { yaw: RING_X * Math.cos(a), pitch: RING_LIFT + RING_Y * Math.sin(a) }; };
   const points = [
-    { ...ringPoint(0), dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                 // right, above the ship
-    { ...ringPoint(1), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },            // straight above the ship
+    { ...ringPoint(1), dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                 // straight above the ship
+    { ...ringPoint(0), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },            // right, above the ship
     { ...ringPoint(2), dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },             // left, above the ship
     { ...ringPoint(3), dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },              // left, below the ship
     { ...ringPoint(4), dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }               // right, below the ship
@@ -3856,7 +3856,10 @@ function init(){
     // its twin on the page: a crisp orb over the canvas, always readable even against the bright throat, and tappable
     const orb = document.createElement('button'); orb.type = 'button'; orb.className = 'light'; orb.setAttribute('aria-label', 'Descubrir un momento oculto'); orb.innerHTML = '<i></i>';
     const cc = d.color.clone(), mx = Math.max(cc.r, cc.g, cc.b); cc.multiplyScalar(1 / mx).convertLinearToSRGB();
-    orb.style.setProperty('--c', 'rgb(' + Math.round(cc.r * 255) + ',' + Math.round(cc.g * 255) + ',' + Math.round(cc.b * 255) + ')');
+    const orbCss = (k) => 'rgb(' + Math.round(k.r * 255) + ',' + Math.round(k.g * 255) + ',' + Math.round(k.b * 255) + ')';
+    orb.style.setProperty('--c', orbCss(cc));
+    orb.style.setProperty('--l', orbCss(cc.clone().lerp(new THREE.Color(1, 1, 1), 0.5)));
+    orb.style.setProperty('--d', orbCss(cc.clone().multiplyScalar(0.2)));
     if (LIGHTS) LIGHTS.appendChild(orb);
     return { anchor, out, right, up, color: d.color, ring, aura, orb, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });

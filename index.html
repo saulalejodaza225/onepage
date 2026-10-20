@@ -99,17 +99,20 @@
     #btn-estabilizar svg { width: 22px; height: 22px; flex: none; }
     #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 2px; }
     #moment-toast span { font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-text-main); }
-    /* the five lights: orbs drawn over the 3D view, each one opens a hidden moment */
+    /* the five lights: glass spheres drawn over the 3D view, each one opens a hidden moment. A dark rim and a shadow keep
+       them readable against the bright tunnel, and a tilted orbit ring around each one gives them depth */
     #lights { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
-    .light { position: absolute; left: 0; top: 0; width: 48px; height: 48px; margin: -24px 0 0 -24px; padding: 0; border: 0; border-radius: 50%; background: radial-gradient(circle, rgba(5,7,13,0.5) 0%, rgba(5,7,13,0.22) 45%, rgba(5,7,13,0) 70%); cursor: pointer; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.6s ease, visibility 0s linear 0.6s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .light { position: absolute; left: 0; top: 0; width: 40px; height: 40px; margin: -20px 0 0 -20px; padding: 0; border: 0; border-radius: 50%;
+      background: radial-gradient(circle at 36% 30%, rgba(255,255,255,0.9) 0, var(--l) 16%, var(--c) 44%, var(--d) 80%, #020309 100%);
+      box-shadow: inset -8px -10px 14px rgba(0,0,0,0.6), inset 2px 3px 5px rgba(255,255,255,0.3), 0 0 0 1px rgba(2,3,9,0.9), 0 8px 16px rgba(0,0,0,0.65), 0 0 22px var(--c);
+      cursor: pointer; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.6s ease, visibility 0s linear 0.6s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
     .light.on { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.6s ease, visibility 0s; }
-    .light::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; border: 1.5px solid var(--c); box-shadow: 0 0 10px var(--c), inset 0 0 6px var(--c); animation: lightRing 2.6s ease-out infinite; }
-    .light i { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #fff; box-shadow: 0 0 4px 1px #fff, 0 0 10px 3px var(--c), 0 0 22px 7px var(--c); transform: scale(calc(1 + var(--k, 0) * 1.1)); transition: transform 0.15s linear; animation: lightCore 2.6s ease-in-out infinite; }
-    .light.flare i { box-shadow: 0 0 6px 2px #fff, 0 0 16px 6px var(--c), 0 0 34px 12px var(--c); }
-    .light:hover::before, .light:focus-visible::before { border-width: 2px; }
-    .light:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
-    @keyframes lightRing { 0% { transform: scale(0.5); opacity: 0.95; } 100% { transform: scale(1.3); opacity: 0; } }
-    @keyframes lightCore { 50% { opacity: 0.75; } }
+    .light::before { content: ""; position: absolute; left: -11px; right: -11px; top: 50%; height: 62px; margin-top: -31px; border-radius: 50%; border: 1.5px solid var(--l); box-shadow: 0 0 8px var(--c); transform: rotateX(72deg); opacity: calc(0.6 + var(--k, 0) * 0.4); pointer-events: none; }
+    .light i { position: absolute; left: 26%; top: 18%; width: 6px; height: 6px; margin: 0; border-radius: 50%; background: #fff; box-shadow: 0 0 3px 1px rgba(255,255,255,0.85); animation: lightCore 2.6s ease-in-out infinite; }
+    .light.flare { box-shadow: inset -8px -10px 14px rgba(0,0,0,0.6), inset 2px 3px 5px rgba(255,255,255,0.3), 0 0 0 1px rgba(2,3,9,0.9), 0 8px 16px rgba(0,0,0,0.65), 0 0 34px var(--c); }
+    .light:hover::before, .light:focus-visible::before { border-width: 2.5px; }
+    .light:focus-visible { outline: 2px solid var(--l); outline-offset: 3px; }
+    @keyframes lightCore { 50% { opacity: 0.6; } }
     /* the aim of the gyroscope: fills while a light sits inside it; the arrow shows where the nearest light is */
     #aim { position: absolute; left: 0; top: 0; width: 56px; height: 56px; margin: -28px 0 0 -28px; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 0.5s ease; --c: #5ce1ff; }
     #aim.on { opacity: 1; }
@@ -133,7 +136,9 @@
     #light-hint.on-aim.below { transform: translate(-50%, 40px); }
     #light-hint.on-aim.below::after { bottom: auto; top: -6px; transform: rotate(225deg); }
     @keyframes hintBob { 50% { margin-top: -5px; } }
-    @media (prefers-reduced-motion: reduce) { #moments-hud .dot, #light-hint.show, .light::before, .light i, #aim .chev::before { animation: none; } }
+    /* on a phone the hint is a narrow column at the top-left, so the top light (centre of the view) stays clear of it */
+    @media (max-width: 600px) { #moments-hud { max-width: 36%; } }
+    @media (prefers-reduced-motion: reduce) { #moments-hud .dot, #light-hint.show, .light i, #aim .chev::before { animation: none; } }
     #btn-gyro, #btn-pause, #btn-hud, #btn-cine, #speed, #speed-out { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
     #loader.done { visibility: hidden; }
     .content-container .button-wrapper { pointer-events: auto; }
