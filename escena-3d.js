@@ -3831,17 +3831,20 @@ function init(){
 
   /* ===== the five activation points ===== */
   const LIFT = THREE.MathUtils.degToRad(12);   // how far above the centre of the view the events appear
-  // the lights ring the ship at the throat of the tunnel, beside its supernovas: about 20° from where the aim rests in the first
-  // view (four of them on screen even on an upright phone), so a small tilt reaches one, yet none fires on its own (the aim catches at 16.5°)
+  // the five lights sit on an ellipse around the aim, 32° wide and 22° tall, at evenly spaced angles: the closest pairs are
+  // about 28° apart (they were about 18°). None is within reach of the aim from the first view (the catch radius is 16.5°);
+  // a few are on screen at the start, the rest are found by following the guiding arrow
   const LIGHTS = document.getElementById('lights');
   const D2R = THREE.MathUtils.degToRad;
   const cam0 = new THREE.PerspectiveCamera(); cam0.position.copy(MT).add(new THREE.Vector3().setFromSpherical(HOME)); cam0.lookAt(MT); cam0.updateMatrixWorld();   // the first view
+  const RING_X = 32, RING_Y = 22, RING_LIFT = 12, RING_AT = [18, 90, 162, 234, 306];   // degrees: the ellipse, the aim's height, where each light sits
+  const ringPoint = (k) => { const a = D2R(RING_AT[k]); return { yaw: RING_X * Math.cos(a), pitch: RING_LIFT + RING_Y * Math.sin(a) }; };
   const points = [
-    { yaw: -15, pitch: -1, dist: 13, color: HC(0.5, 1.4, 2.0), defs: TIME },             // below the ship, to the left (mirrors the physics light)
-    { yaw: -15, pitch: 25, dist: 15, color: HC(2.0, 0.5, 1.6), defs: CREATURES },        // above the ship, to the left
-    { yaw: 15, pitch: 25, dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },          // above the ship, to the right
-    { yaw: 15, pitch: -1, dist: 13, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },           // below the ship, to the right
-    { yaw: 0, pitch: 34, dist: 15, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }            // straight above the ship
+    { ...ringPoint(0), dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                 // right, above the ship
+    { ...ringPoint(1), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },            // straight above the ship
+    { ...ringPoint(2), dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },             // left, above the ship
+    { ...ringPoint(3), dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },              // left, below the ship
+    { ...ringPoint(4), dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }               // right, below the ship
   ].map((d) => {
     const y = D2R(d.yaw), x = D2R(d.pitch);
     const out = V(Math.sin(y) * Math.cos(x), Math.sin(x), -Math.cos(y) * Math.cos(x)).applyQuaternion(cam0.quaternion).normalize();
