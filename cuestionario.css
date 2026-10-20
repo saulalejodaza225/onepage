@@ -1,4 +1,10 @@
 /* Cuestionario y compra (cualquier página que tenga el bloque .quiz). */
+:root {
+  --color-accent-blue: #2563EB;
+  --color-accent-blue-hover: #1D4ED8;
+  --color-accent-gold: #C7A86B;
+  --color-accent-gold-hover: #D6BC86;
+}
 /* Cuestionario: reemplaza el título y el botón cuando se presiona "Conoce tu negocio". */
 .quiz { pointer-events: auto; display: flex; flex-direction: column; gap: 12px; max-height: min(68dvh, 560px); overflow-y: auto; overscroll-behavior: contain; padding: 18px 16px 16px; border-radius: 18px; background: rgba(5,7,13,0.74); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); animation: quizIn 0.35s ease both; }
 .quiz[hidden], .text-block[hidden], .button-wrapper[hidden] { display: none; }
@@ -28,9 +34,13 @@
 .quiz-r-text { font-size: 13.5px; line-height: 1.5; color: var(--color-text-main); }
 .quiz-actions { display: grid; gap: 8px; margin-top: 8px; }
 .quiz-actions a, .quiz-actions button { min-height: 48px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-btn); font-family: var(--font-mono); font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
-.quiz-buy { background: linear-gradient(135deg, var(--color-accent-cyan) 0%, #3B82F6 100%); color: var(--color-text-btn); border: none; box-shadow: 0 4px 20px rgba(92,225,255,0.22); }
+.quiz-demo { background: var(--color-accent-blue); color: var(--color-text-main); border: none; box-shadow: 0 4px 18px rgba(37,99,235,0.28); transition: background 0.15s, transform 0.12s; }
+.quiz-demo:hover { background: var(--color-accent-blue-hover); }
+.quiz-buy { background: var(--color-accent-gold); color: var(--color-text-btn); border: none; box-shadow: 0 4px 18px rgba(199,168,107,0.22); transition: background 0.15s, transform 0.12s; }
+.quiz-buy:hover:not(:disabled) { background: var(--color-accent-gold-hover); }
+.quiz-demo:active, .quiz-buy:active { transform: scale(0.98); }
 .quiz-buy:disabled { opacity: 0.6; cursor: progress; }
-.quiz-demo, .quiz-co-back { background: rgba(13,20,36,0.6); color: var(--color-text-main); border: 1px solid rgba(92,225,255,0.28); }
+.quiz-co-back { background: rgba(13,20,36,0.6); color: var(--color-text-main); border: 1px solid rgba(92,225,255,0.28); }
 .quiz-checkout { display: flex; flex-direction: column; gap: 10px; }
 .quiz-checkout[hidden], .quiz-co-error[hidden] { display: none; }
 .quiz-co-summary { font-size: 13px; line-height: 1.4; }
