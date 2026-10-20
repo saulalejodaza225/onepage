@@ -2,16 +2,40 @@
 
 Página de presentación con cuestionario. Al terminar, el visitante recibe un modelo recomendado, puede comprarlo con Wompi y acepta el paquete de bienvenida.
 
+**Para configurar los pagos y el correo, sigue [CONFIGURAR.md](CONFIGURAR.md).** Puedes revisar en cualquier momento lo que falta con `npm run verificar`.
+
+## Estructura
+
+| Archivo o carpeta | Qué es |
+|---|---|
+| `index.html`, `code.html` | Las páginas con el cuestionario. Son iguales. |
+| `cuestionario.js`, `cuestionario.css` | El cuestionario y la compra. Los usan las dos páginas. |
+| `pago-resultado.html` | Página a la que vuelve el visitante después de pagar. |
+| `api/wompi/` | Funciones del servidor: crear el pago, recibir avisos de Wompi y consultar el estado. |
+| `lib/` | Lógica compartida: Wompi, documentos, correo y entrega del paquete. |
+| `paquete/` | Plantillas, documentos de ejemplo y datos del proveedor. |
+| `scripts/` | `verificar.js` (revisa la configuración) y `paquete.js` (genera documentos). |
+
 ## Cómo funciona la compra
 
 1. El cuestionario recomienda un modelo (Landing, PYME, Empresarial o Tienda).
-2. "Comprar este modelo" pide nombre, correo y la aceptación del paquete de bienvenida. El paquete de instrucciones y la encuesta son opcionales.
+2. **Comprar este modelo** pide nombre, correo y la aceptación del paquete de bienvenida. El paquete de instrucciones y la encuesta son opcionales.
 3. `POST /api/wompi/checkout` toma el precio desde `lib/wompi.js`, calcula la firma de integridad en el servidor y devuelve la URL de pago.
 4. El visitante paga en la página segura de Wompi y vuelve a `pago-resultado.html?id=…`.
 5. La página consulta el estado con `GET /api/wompi/transaction`.
 6. Wompi envía cada cambio de estado a `POST /api/wompi/webhook`. El servidor verifica el checksum y, si el pago está aprobado, entrega el paquete de bienvenida.
 
 El precio nunca viene del navegador: el servidor lo toma de `PLANES`.
+
+## Agregar el cuestionario a otra página
+
+Cualquier página puede tener la compra. Copia de `index.html`:
+
+1. En `<head>`, el enlace a `cuestionario.css`.
+2. El botón `#cta-button` y el bloque `<div class="quiz" id="quiz">` (con su formulario).
+3. Al final del `<body>`, después de `escena-3d.js`, el script `cuestionario.js`.
+
+Las rutas `paquete/documentos/…` y `pago-resultado.html` deben seguir funcionando desde la página nueva.
 
 ## Paquete de bienvenida
 
@@ -27,34 +51,28 @@ El precio nunca viene del navegador: el servidor lo toma de `PLANES`.
 
 Las fuentes editables están en `paquete/plantillas/*.md`. Los campos `{{CAMPO}}` se llenan con los datos de cada compra.
 
-Para regenerar las plantillas:
-
 ```bash
+# Regenerar los documentos con los campos en blanco
 node scripts/paquete.js --proveedor paquete/proveedor.ejemplo.json --salida paquete/documentos
-```
 
-Para generar el paquete de un pedido concreto, por ejemplo para enviarlo a mano:
-
-```bash
+# Generar el paquete de un pedido concreto, por ejemplo para enviarlo a mano
 node scripts/paquete.js --plan L --nombre "Ana Pérez" --correo ana@ejemplo.com --referencia PAG-L-I-… --instrucciones
 ```
 
 ### Datos del proveedor
 
-Copia `paquete/proveedor.ejemplo.json` a `paquete/proveedor.json` y completa todos los campos. Ese archivo no se sube a git. En el hosting, define la variable `PROVEEDOR_JSON` con el mismo contenido en una sola línea. Si falta algún dato, el paquete no se envía.
+Copia `paquete/proveedor.ejemplo.json` a `paquete/proveedor.json` y completa todos los campos. Ese archivo no se sube a git. En Vercel, define la variable `PROVEEDOR_JSON` con el mismo contenido en una sola línea. Si falta algún dato, el paquete no se envía.
 
 ### Envío
 
-Con el pago aprobado, el webhook genera el paquete y lo envía por correo con [Resend](https://resend.com). Para activarlo, define `RESEND_API_KEY` y `EMAIL_FROM` (un remitente de un dominio verificado en Resend).
-
-El envío queda pendiente, y se deja registrado en los logs, en estos casos:
+Con el pago aprobado, el webhook genera el paquete y lo envía por correo con [Resend](https://resend.com). Queda pendiente, y se registra en los logs, en estos casos:
 
 - No hay correo configurado.
 - La transacción no trae nombre o correo del cliente.
 - El monto cobrado no coincide con el modelo.
 - Faltan datos del proveedor.
 
-En esos casos, genera el paquete con el comando anterior y envíalo a mano.
+En esos casos, genera el paquete con el comando de arriba y envíalo a mano.
 
 ### Registro de la aceptación
 
@@ -69,8 +87,9 @@ Cada compra deja un registro `[consentimiento]` en los logs, con la referencia, 
 ## Ejecutar en local
 
 ```bash
-cp .env.example .env     # llena las llaves de sandbox
 npm install
+cp .env.example .env     # llena las llaves de sandbox
+npm run verificar        # revisa la configuración
 npm start                # http://localhost:3000
 ```
 
@@ -78,14 +97,11 @@ Requiere Node 18 o superior. La única dependencia es `pdf-lib`, que genera los 
 
 ## Publicar
 
-Las rutas `/api` necesitan un hosting con funciones, por ejemplo Vercel. GitHub Pages solo sirve archivos estáticos y no puede cobrar ni enviar correos.
+El sitio está en Vercel (`https://onepage-navy.vercel.app`, según el repositorio). Las rutas `/api` necesitan un hosting con funciones. GitHub Pages solo sirve archivos estáticos: ahí el cuestionario se ve, pero la compra muestra que todavía no está disponible.
 
-1. Importa el repositorio en Vercel. El archivo `vercel.json` incluye la carpeta `paquete/` en las funciones.
-2. Configura las variables de `.env.example` en Vercel, con `PUBLIC_URL` igual a tu dominio. Incluye `PROVEEDOR_JSON`, `RESEND_API_KEY` y `EMAIL_FROM`.
-3. En el Dashboard de Wompi, configura la URL de eventos como `https://tu-dominio/api/wompi/webhook`.
-4. Cuando las pruebas en sandbox funcionen, cambia `WOMPI_ENV=production` y usa las llaves de producción.
+`vercel.json` incluye la carpeta `paquete/` en las funciones. Cada cambio que subes a `main` se despliega en Vercel.
 
 ## Pendiente
 
-- Una base de datos para pedidos y para el registro de consentimiento. Hoy todo vive en logs. Con una base de datos también se evitarían envíos duplicados si Wompi reintenta un aviso.
+- Una base de datos para pedidos y para el registro de aceptaciones. Hoy todo vive en logs. Con una base de datos también se evitarían envíos duplicados si Wompi reintenta un aviso.
 - Confirmar con un pago de prueba en sandbox los nombres de los campos que usa el código (`customer_data`, `customer_email`, `amount_in_cents`) y los parámetros del checkout (`customer-data:*`, `signature:integrity`).

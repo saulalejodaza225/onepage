@@ -4,6 +4,7 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const { cargarEnv } = require('./lib/env');
 
 const RAIZ = __dirname;
 const PUERTO = Number(process.env.PORT) || 3000;
@@ -22,17 +23,8 @@ const TIPOS = {
   '.woff2': 'font/woff2',
   '.pdf': 'application/pdf'
 };
-const NO_SERVIBLES = ['server.js', 'package.json', 'README.md'];
+const NO_SERVIBLES = ['server.js', 'package.json', 'README.md', 'CONFIGURAR.md'];
 const CARPETAS_PRIVADAS = ['api', 'lib', 'scripts', 'node_modules'];
-
-function cargarEnv() {
-  const archivo = path.join(RAIZ, '.env');
-  if (!fs.existsSync(archivo)) return;
-  fs.readFileSync(archivo, 'utf8').split('\n').forEach(linea => {
-    const m = linea.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  });
-}
 
 function noEncontrado(res) {
   res.statusCode = 404;
@@ -73,7 +65,7 @@ function servirArchivo(ruta, res) {
   });
 }
 
-cargarEnv();
+cargarEnv(RAIZ);
 
 http.createServer(async (req, res) => {
   try {
@@ -88,5 +80,5 @@ http.createServer(async (req, res) => {
 }).listen(PUERTO, () => {
   const cfg = require('./lib/wompi').configuracion();
   console.log(`Sitio en http://localhost:${PUERTO}`);
-  console.log(cfg ? `Pagos Wompi en modo ${cfg.modo}` : 'Pagos sin configurar: revisa el archivo .env');
+  console.log(cfg ? `Pagos Wompi en modo ${cfg.modo}` : 'Pagos sin configurar: revisa el archivo .env (o ejecuta npm run verificar)');
 });

@@ -4,7 +4,8 @@
   "private": true,
   "description": "Página de presentación con cuestionario y compra de modelos web con pagos Wompi",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "verificar": "node scripts/verificar.js"
   },
   "engines": {
     "node": ">=18"
