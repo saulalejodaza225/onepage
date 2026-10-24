@@ -99,20 +99,37 @@
     #btn-estabilizar svg { width: 22px; height: 22px; flex: none; }
     #moment-toast strong { display: block; font-family: var(--font-title); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-cyan); margin-bottom: 2px; }
     #moment-toast span { font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-text-main); }
-    /* the five lights: glass spheres drawn over the 3D view, each one opens a hidden moment. A dark rim and a shadow keep
-       them readable against the bright tunnel, and a tilted orbit ring around each one gives them depth */
+    /* the five lights: faint stars lost in space until the aim comes close. Then a glass sphere with an orbit ring forms around the
+       star (--n: 0 far … 1 revealed; --k: how long the aim has rested on it). The dark rim keeps the revealed sphere readable against the
+       bright tunnel. The button itself is only the hit area. */
     #lights { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
-    .light { position: absolute; left: 0; top: 0; width: 40px; height: 40px; margin: -20px 0 0 -20px; padding: 0; border: 0; border-radius: 50%;
-      background: radial-gradient(circle at 36% 30%, rgba(255,255,255,0.9) 0, var(--l) 16%, var(--c) 44%, var(--d) 80%, #020309 100%);
-      box-shadow: inset -8px -10px 14px rgba(0,0,0,0.6), inset 2px 3px 5px rgba(255,255,255,0.3), 0 0 0 1px rgba(2,3,9,0.9), 0 8px 16px rgba(0,0,0,0.65), 0 0 22px var(--c);
-      cursor: pointer; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.6s ease, visibility 0s linear 0.6s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-    .light.on { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.6s ease, visibility 0s; }
-    .light::before { content: ""; position: absolute; left: -11px; right: -11px; top: 50%; height: 62px; margin-top: -31px; border-radius: 50%; border: 1.5px solid var(--l); box-shadow: 0 0 8px var(--c); transform: rotateX(72deg); opacity: calc(0.6 + var(--k, 0) * 0.4); pointer-events: none; }
-    .light i { position: absolute; left: 26%; top: 18%; width: 6px; height: 6px; margin: 0; border-radius: 50%; background: #fff; box-shadow: 0 0 3px 1px rgba(255,255,255,0.85); animation: lightCore 2.6s ease-in-out infinite; }
-    .light.flare { box-shadow: inset -8px -10px 14px rgba(0,0,0,0.6), inset 2px 3px 5px rgba(255,255,255,0.3), 0 0 0 1px rgba(2,3,9,0.9), 0 8px 16px rgba(0,0,0,0.65), 0 0 34px var(--c); }
-    .light:hover::before, .light:focus-visible::before { border-width: 2.5px; }
+    .light { position: absolute; left: 0; top: 0; width: 48px; height: 48px; margin: -24px 0 0 -24px; padding: 0; border: 0; border-radius: 50%; background: none; --n: 0; --k: 0;
+      cursor: pointer; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.9s ease, visibility 0s linear 0.9s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .light.on { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.9s ease, visibility 0s; }
+    .light b { position: absolute; left: 50%; top: 50%; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%;
+      background: radial-gradient(circle at 36% 30%, #fff 0, var(--l) 16%, var(--c) 44%, var(--d) 80%, #020309 100%);
+      box-shadow: inset -7px -9px 12px rgba(0,0,0,0.6), inset 2px 3px 4px rgba(255,255,255,0.28), 0 0 0 1px rgba(2,3,9,0.9), 0 7px 14px rgba(0,0,0,0.6), 0 0 22px var(--c);
+      transform: scale(calc(0.12 + var(--n) * 0.88 + var(--k) * 0.14)); opacity: calc(0.18 + var(--n) * 0.82); }
+    .light i { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fff; box-shadow: 0 0 5px 1px rgba(255,255,255,0.65), 0 0 9px 2px var(--c);
+      opacity: calc(0.55 - var(--n) * 0.5); animation: starTwinkle 3.4s ease-in-out infinite; }
+    .light::before, .light::after { content: ""; position: absolute; left: 50%; top: 50%; border-radius: 50%; pointer-events: none; }
+    .light::before { width: 64px; height: 64px; margin: -32px 0 0 -32px; border: 1.5px solid var(--l); box-shadow: 0 0 8px var(--c), inset 0 0 6px var(--c);
+      transform: rotateX(72deg) scale(calc(0.3 + var(--n) * 0.7)); opacity: calc(var(--n) * var(--n) * (0.55 + var(--k) * 0.45)); }
+    .light::after { width: 92px; height: 92px; margin: -46px 0 0 -46px; border: 1.5px solid rgba(255,255,255,0.85); box-shadow: 0 0 10px #fff;
+      transform: rotateX(72deg) scale(calc(1.5 - var(--k) * 0.6)); opacity: calc(var(--k) * 0.9); }
+    .light.flare b { filter: brightness(1.7); }
+    .light.flare i { opacity: 0.95; }
+    .light:hover b { filter: brightness(1.25); }
     .light:focus-visible { outline: 2px solid var(--l); outline-offset: 3px; }
-    @keyframes lightCore { 50% { opacity: 0.6; } }
+    @keyframes starTwinkle { 50% { transform: scale(0.55); } }
+    /* the discovery: a flash and a shock ring where the light was */
+    .light-burst { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+    .light-burst::before, .light-burst::after { content: ""; position: absolute; border-radius: 50%; }
+    .light-burst::before { left: -9px; top: -9px; width: 18px; height: 18px; border: 2px solid var(--c); box-shadow: 0 0 24px var(--c), inset 0 0 16px var(--c); animation: burstRing 1.2s cubic-bezier(0.1, 0.7, 0.2, 1) forwards; }
+    .light-burst::after { left: -16px; top: -16px; width: 32px; height: 32px; background: radial-gradient(circle, #fff 0, var(--c) 38%, rgba(0,0,0,0) 70%); animation: burstFlash 0.8s ease-out forwards; }
+    @keyframes burstRing { from { width: 18px; height: 18px; left: -9px; top: -9px; opacity: 1; } to { width: 440px; height: 440px; left: -220px; top: -220px; opacity: 0; } }
+    @keyframes burstFlash { from { transform: scale(0.8); opacity: 1; } 35% { opacity: 1; } to { transform: scale(10); opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .light i { animation: none; } .light-burst { display: none; } }
     /* the aim of the gyroscope: fills while a light sits inside it; the arrow shows where the nearest light is */
     #aim { position: absolute; left: 0; top: 0; width: 56px; height: 56px; margin: -28px 0 0 -28px; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 0.5s ease; --c: #5ce1ff; }
     #aim.on { opacity: 1; }

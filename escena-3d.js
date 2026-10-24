@@ -1186,7 +1186,8 @@ function init(){
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
   const GYRO_GAIN = 2.4;
-  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null, home: null };
+  const GYRO_LEAK = 2.0;   // seconds: while an event plays the view settles back onto it, wherever the phone rests
+  const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null, home: null, hold: null, pull: { phi: 0, theta: 0 }, prev: new THREE.Quaternion(), act: 0 };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
   function onTilt(e){
@@ -1211,7 +1212,22 @@ function init(){
     if (!gyro.cal){ gsph.setFromVector3(off.copy(camera.position).sub(controls.target)); gyro.cal = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; gyro.home = { r: gsph.radius, theta: gsph.theta, phi: gsph.phi }; }
     _ge.setFromQuaternion(gyro.cur, 'YXZ');
     // amplified: turning the phone by X degrees turns the view by about 2.4X, so a small tilt is enough
-    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + _ge.x * GYRO_GAIN, 0.3, 2.85), gyro.cal.theta + _ge.y * GYRO_GAIN);
+    const offP = _ge.x * GYRO_GAIN, offT = _ge.y * GYRO_GAIN;
+    // how fast the phone is turning (rad/s), smoothed: the pull toward a light only works while you are searching, never at rest
+    gyro.act += (gyro.prev.angleTo(gyro.cur) / Math.max(raw, 1e-3) - gyro.act) * (1 - Math.exp(-raw * 6)); gyro.prev.copy(gyro.cur);
+    if (gyro.hold && !focus){
+      // an event is playing (or has just ended): the view settles onto its best angle wherever the phone rests, so the phone can
+      // go back to a comfortable pose without losing the event. After an event the view settles on home and that pose becomes home.
+      const H = gyro.hold, kk = 1 - Math.exp(-raw / (H.rebase != null ? 0.5 : GYRO_LEAK));
+      gyro.cal.phi += (H.phi - offP - gyro.cal.phi) * kk; gyro.cal.theta += wrapA(H.theta - offT - gyro.cal.theta) * kk;
+      if (H.rebase != null){
+        H.rebase -= raw;
+        if (H.rebase <= 0){ gyro.base.copy(_dq); gyro.rel.identity(); gyro.cur.identity(); gyro.prev.identity(); gyro.cal.phi = gyro.home.phi; gyro.cal.theta = gyro.home.theta; gyro.hold = null; return gyroApply(0.0001); }
+      }
+    }
+    const vPhi = THREE.MathUtils.clamp(gyro.cal.phi + offP + gyro.pull.phi, 0.3, 2.85), vTheta = gyro.cal.theta + offT + gyro.pull.theta;
+    stepPull(raw, gyro.cal.r, vPhi, vTheta);
+    gsph.set(gyro.cal.r, THREE.MathUtils.clamp(gyro.cal.phi + offP + gyro.pull.phi, 0.3, 2.85), gyro.cal.theta + offT + gyro.pull.theta);
     camera.position.copy(controls.target).add(off.setFromSpherical(gsph));
     camera.lookAt(controls.target);
   }
@@ -3854,14 +3870,14 @@ function init(){
     const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); scene.add(ring);
     const aura = sprite(nebulaTex, d.color.clone().multiplyScalar(0.3)); aura.position.copy(anchor).addScaledVector(out, 2); aura.visible = false; scene.add(aura);
     // its twin on the page: a crisp orb over the canvas, always readable even against the bright throat, and tappable
-    const orb = document.createElement('button'); orb.type = 'button'; orb.className = 'light'; orb.setAttribute('aria-label', 'Descubrir un momento oculto'); orb.innerHTML = '<i></i>';
+    const orb = document.createElement('button'); orb.type = 'button'; orb.className = 'light'; orb.setAttribute('aria-label', 'Descubrir un momento oculto'); orb.innerHTML = '<b></b><i></i>'; orb.style.setProperty('--n', '0');
     const cc = d.color.clone(), mx = Math.max(cc.r, cc.g, cc.b); cc.multiplyScalar(1 / mx).convertLinearToSRGB();
     const orbCss = (k) => 'rgb(' + Math.round(k.r * 255) + ',' + Math.round(k.g * 255) + ',' + Math.round(k.b * 255) + ')';
     orb.style.setProperty('--c', orbCss(cc));
     orb.style.setProperty('--l', orbCss(cc.clone().lerp(new THREE.Color(1, 1, 1), 0.5)));
     orb.style.setProperty('--d', orbCss(cc.clone().multiplyScalar(0.2)));
     if (LIGHTS) LIGHTS.appendChild(orb);
-    return { anchor, out, right, up, color: d.color, ring, aura, orb, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
+    return { anchor, out, right, up, color: d.color, ring, aura, orb, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', n: 0, time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });
   function nextIndex(p){
     if (!p.bag.length){
@@ -3902,6 +3918,21 @@ function init(){
     }
     return { phi, theta };
   }
+  /* while you sweep the phone near a light, the view is drawn gently toward it (never at rest, never while an event plays), so a
+     light needs less phone movement to be reached. The pull fades away as soon as you stop or leave. */
+  const PULL_R = 32, PULL_MAX = 24;   // degrees: where a light starts to draw the view, and its strongest draw in degrees per second
+  function stepPull(raw, r, phi, theta){
+    const P = gyro.pull;
+    let tgt = null, bs = -2;
+    if (!focus && !points.some((q) => q.state === 'on')){ for (const q of points){ if (q.state !== 'idle') continue; const sc = viewScore(r, phi, theta, q.anchor); if (sc > bs){ bs = sc; tgt = q; } } }
+    const d = tgt ? Math.acos(Math.min(1, bs)) * 57.2958 : 99, gate = smooth(0.06, 0.28, gyro.act);
+    if (tgt && d < PULL_R && d > 2.5 && gate > 0.01){
+      const e = 0.01, gp = (viewScore(r, phi + e, theta, tgt.anchor) - bs) / e, gt = (viewScore(r, phi, theta + e, tgt.anchor) - bs) / e, gl = Math.hypot(gp, gt) || 1;
+      const v = D2R(PULL_MAX) * smooth(PULL_R, 14, d) * gate;
+      P.phi += gp / gl * v * raw; P.theta += gt / gl * v * raw;
+    } else { const k = Math.exp(-raw / 0.7); P.phi *= k; P.theta *= k; }
+    const m = Math.hypot(P.phi, P.theta), cap = D2R(16); if (m > cap){ P.phi *= cap / m; P.theta *= cap / m; }
+  }
   function focusOn(anchor){
     if (typeof stab !== 'undefined') stab = null;
     if (cineOn()){ cineBack = true; setCine(false); }
@@ -3909,9 +3940,11 @@ function init(){
     const r = _fs.radius;
     if (gyro.on && gyro.cal){
       // where the phone points now, on top of the reference; move the reference so that this pose shows the event
+      gyro.cal.phi += gyro.pull.phi; gyro.cal.theta += gyro.pull.theta; gyro.pull.phi = gyro.pull.theta = 0;   // the pull becomes part of the reference
       _ge.setFromQuaternion(gyro.cur, 'YXZ');
       const nowPhi = THREE.MathUtils.clamp(gyro.cal.phi + _ge.x * GYRO_GAIN, 0.3, 2.85), nowTheta = gyro.cal.theta + _ge.y * GYRO_GAIN;
       const b = bestView(anchor, gyro.cal.r, nowPhi, nowTheta);
+      gyro.hold = { phi: b.phi, theta: b.theta };   // after the glide, the view keeps settling onto this angle
       focus = { t: 0, d: 1.3, gy: true, p0: gyro.cal.phi, t0: gyro.cal.theta, p1: gyro.cal.phi + (b.phi - nowPhi), t1: gyro.cal.theta + wrapA(b.theta - nowTheta) };
     } else {
       const b = bestView(anchor, r, _fs.phi, _fs.theta);
@@ -3929,11 +3962,20 @@ function init(){
   // put the phone upright and you are looking at the view you started from, ready for the next light
   function unfocus(){
     if (gyro.on && gyro.cal && gyro.home){
-      focus = { t: 0, d: 1.3, gy: true, p0: gyro.cal.phi, t0: gyro.cal.theta, p1: gyro.home.phi, t1: gyro.cal.theta + wrapA(gyro.home.theta - gyro.cal.theta) };
+      focus = null; gyro.hold = { phi: gyro.home.phi, theta: gyro.home.theta, rebase: 1.8 };   // the view settles on home wherever the phone rests, and that pose becomes home
     } else {
       _fs.setFromVector3(_fv.copy(camera.position).sub(controls.target));
       focus = { t: 0, d: 1.3, gy: false, r: HOME.radius, p0: _fs.phi, t0: _fs.theta, p1: HOME.phi, t1: _fs.theta + wrapA(HOME.theta - _fs.theta) };
     }
+  }
+  // the moment of discovery: a flash and a shock ring where the light was, and a short buzz on phones that allow it
+  function discover(p){
+    if (LIGHTS){
+      const b = document.createElement('div'); b.className = 'light-burst';
+      if (p.orb.style.transform) b.style.transform = p.orb.style.transform; else { b.style.left = '50%'; b.style.top = '35%'; }
+      b.style.setProperty('--c', p.orb.style.getPropertyValue('--c')); LIGHTS.appendChild(b); setTimeout(() => b.remove(), 1400);
+    }
+    try { if (navigator.vibrate) navigator.vibrate([16, 50, 30]); } catch (err){}
   }
   function playPoint(p, idx){
     const i = idx != null ? idx : p.first ? 0 : nextIndex(p), def = p.defs[i];
@@ -3944,7 +3986,7 @@ function init(){
     p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false; found++;
     points.forEach((q) => { if (q !== p && q.state === 'spent') q.state = 'idle'; });   // activating a point brings the spent ones back
     toast(def);
-    fireBurst(p); astroReact(def, p); focusOn(p.anchor);
+    fireBurst(p); astroReact(def, p); focusOn(p.anchor); discover(p);
   }
   // the heaviest event builds its little world in a quiet moment after the page loads, so it opens instantly
   const idle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 300 }) : (f) => setTimeout(() => f({ timeRemaining: () => 8 }), 30);
@@ -3955,7 +3997,7 @@ function init(){
     idle(go);
   })), 3500);
   // the aim recognises a light within 16.5° of its centre, and starts to colour from 26°
-  const GAZE = Math.cos(D2R(16.5)), NEAR = Math.cos(D2R(26)), DWELL = 0.55;
+  const GAZE = Math.cos(D2R(16.5)), NEAR = Math.cos(D2R(26)), ARROW = Math.cos(D2R(18)), DWELL = 0.55;
   let found = 0;
   const cineOn = () => { try { return cine; } catch (err){ return false; } };   // declared further down, with the UI
   /* tap a light to play it: a short tap (not a drag) close to where the light is on screen */
@@ -4039,13 +4081,15 @@ function init(){
       p.dwell = p === aimP && s > GAZE && !cineOn() && !playing ? p.dwell + raw : Math.max(0, p.dwell - raw * 2);   // the slow cinematic drift never fires a light by itself, nor does anything while an event plays
       if (p.dwell >= DWELL){ playPoint(p); continue; }
       const g = p.glint, pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + p.ph), pi = points.indexOf(p);
-      const wave = Math.exp(-Math.pow(((t % 7) - 1 - pi * 0.22) / 0.16, 2));   // every few seconds a flare runs from light to light
+      const ang = Math.acos(Math.min(1, s)) * 57.2958;   // degrees from the aim
+      p.n += (smooth(24, 13, ang) - p.n) * (1 - Math.exp(-raw * 5));   // 0 = a faint star lost in space … 1 = the light fully revealed
+      const n = p.n, wave = Math.exp(-Math.pow(((t % 9) - 1 - pi * 0.3) / 0.14, 2)) * (1 - n);   // a rare twinkle runs from star to star
       const call = hint.on && hint.p === p ? 0.5 + 0.5 * Math.sin(t * 6) : 0;
-      g.visible = true; p.orb.style.setProperty('--k', (p.dwell / DWELL).toFixed(2)); p.orb.classList.toggle('flare', wave > 0.5 || call > 0.6);
-      g.material.opacity = Math.min(1, 0.32 + 0.22 * pulse + 0.5 * near + 0.5 * wave);
-      g.scale.setScalar(p.glint0 * (0.42 + 0.1 * pulse + 0.5 * near + 0.45 * wave + 0.2 * call + 1.0 * p.dwell / DWELL));
-      p.ring.visible = true; p.ring.material.opacity = Math.min(1, 0.16 + 0.12 * pulse + 0.4 * near + 0.35 * wave + 0.3 * call); p.ring.material.rotation += raw * 0.6;
-      p.ring.scale.setScalar(p.glint0 * (1.25 + 0.15 * Math.sin(t * 1.7 + p.ph) + 0.5 * wave + 0.6 * near - 0.8 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
+      g.visible = true; p.orb.style.setProperty('--k', (p.dwell / DWELL).toFixed(2)); p.orb.style.setProperty('--n', n.toFixed(3)); p.orb.classList.toggle('flare', wave > 0.4 || call > 0.6);
+      g.material.opacity = Math.min(1, 0.1 + 0.07 * pulse + 0.75 * n + 0.45 * wave + 0.2 * call);
+      g.scale.setScalar(p.glint0 * (0.2 + 0.04 * pulse + 0.7 * n + 0.5 * wave + 0.15 * call + 1.1 * p.dwell / DWELL));
+      p.ring.visible = n > 0.05; p.ring.material.opacity = Math.min(1, 0.55 * n * n + 0.3 * p.dwell / DWELL); p.ring.material.rotation += raw * (0.4 + 1.6 * n);
+      p.ring.scale.setScalar(p.glint0 * (1.8 - 0.6 * n + 0.1 * Math.sin(t * 1.7 + p.ph) - 0.9 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
     }
     _mndc.copy(camera.position).add(_mf).project(camera); aim.y = _mndc.y;
     const ax = (_mndc.x * 0.5 + 0.5) * cr.width, ay = (0.5 - _mndc.y * 0.5) * cr.height; aim.px = ax; aim.py = ay;
@@ -4062,7 +4106,7 @@ function init(){
           _mndc.copy(best.anchor).project(camera);
           let dx = (_mndc.x * 0.5 + 0.5) * cr.width - ax, dy = (0.5 - _mndc.y * 0.5) * cr.height - ay; if (_mndc.z > 1){ dx = -dx; dy = -dy; }
           aim.ang = Math.atan2(dy, dx); AIM.style.setProperty('--a', aim.ang.toFixed(3) + 'rad');
-          AIM.classList.toggle('near', bs > NEAR); AIM.classList.toggle('far', bs <= NEAR);
+          AIM.classList.toggle('near', bs > ARROW); AIM.classList.toggle('far', bs <= ARROW);   // the arrow leads the way until a light is about to be caught
         } else AIM.classList.remove('near', 'far');
       }
     }
@@ -4431,14 +4475,14 @@ function init(){
   const BLOCKED = 'El visor donde se abre esta página bloquea los sensores de movimiento. Ábrela en tu propia web (con https) y el giroscopio funcionará.';
   let stab = null; const _stP = new THREE.Vector3(), _stH = new THREE.Vector3();
   function stabilize(){
-    focus = null;
+    focus = null; gyro.hold = null; gyro.pull.phi = gyro.pull.theta = 0;
     setCine(false);
     if (gyro.on){ goHome(); gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); return; }   // with the gyroscope, the current pose becomes the new centre
     stab = { t: 0, from: camera.position.clone() };
   }
   const btnStab = document.getElementById('btn-estabilizar');
   if (btnStab) btnStab.addEventListener('click', stabilize);
-  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'mueve tu celular y sigue la flecha' : ('arrastra y sigue la flecha'); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
+  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); gyro.hold = null; gyro.pull.phi = gyro.pull.theta = 0; gyro.act = 0; gyro.prev.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'mueve tu celular y sigue la flecha' : ('arrastra y sigue la flecha'); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
   async function askGyro(fromTap){
     if (needsAsk){
       try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted'){ if (fromTap) note('Permiso de movimiento denegado. Actívalo en Ajustes › Safari › Movimiento y orientación.'); return; } }
