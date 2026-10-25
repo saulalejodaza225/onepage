@@ -1186,7 +1186,8 @@ function init(){
      The reading at the moment the gyroscope switches on is the zero point. From there the view
      follows the phone 1:1, with a short smoothing to remove sensor jitter. Press the button again to recalibrate. */
   const GYRO_GAIN = 2.4;
-  const GYRO_LEAK = 2.0;   // seconds: while an event plays the view settles back onto it, wherever the phone rests
+  // while an event plays the view settles back onto it wherever the phone rests: in about 0.6 s when the phone is still, and hardly at all
+  // (6 s) while it is moving, so looking around stays free but a comfortable pose is never lost
   const gyro = { on: false, seen: false, base: null, rel: new THREE.Quaternion(), cur: new THREE.Quaternion(), cal: null, home: null, hold: null, pull: { phi: 0, theta: 0 }, prev: new THREE.Quaternion(), act: 0 };
   const _dq = new THREE.Quaternion(), _de = new THREE.Euler(), _ze = new THREE.Vector3(0, 0, 1);
   const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _q0 = new THREE.Quaternion(), _ge = new THREE.Euler();
@@ -1218,7 +1219,7 @@ function init(){
     if (gyro.hold && !focus){
       // an event is playing (or has just ended): the view settles onto its best angle wherever the phone rests, so the phone can
       // go back to a comfortable pose without losing the event. After an event the view settles on home and that pose becomes home.
-      const H = gyro.hold, kk = 1 - Math.exp(-raw / (H.rebase != null ? 0.5 : GYRO_LEAK));
+      const H = gyro.hold, kk = 1 - Math.exp(-raw / (H.rebase != null ? 0.5 : lerp(0.6, 6, smooth(0.08, 0.5, gyro.act))));
       gyro.cal.phi += (H.phi - offP - gyro.cal.phi) * kk; gyro.cal.theta += wrapA(H.theta - offT - gyro.cal.theta) * kk;
       if (H.rebase != null){
         H.rebase -= raw;
@@ -1279,7 +1280,7 @@ function init(){
   const residents = [];   // creatures that stay in the tunnel after their event (the whale, the jellyfish, the school…)
   const MUI = { hint: $('moments-hint'), toast: $('moment-toast') };
   const touchUI = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
-  if (MUI.hint) MUI.hint.textContent = 'arrastra y sigue la flecha';
+  if (MUI.hint) MUI.hint.textContent = 'arrastra y busca con el radar';
 
   /* small kit shared by the events */
   const dotTex = spriteTex(64, (g, S) => { const h = S / 2, gr = g.createRadialGradient(h, h, 0, h, h, h); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, S, S); });
@@ -3854,6 +3855,17 @@ function init(){
   const D2R = THREE.MathUtils.degToRad;
   const cam0 = new THREE.PerspectiveCamera(); cam0.position.copy(MT).add(new THREE.Vector3().setFromSpherical(HOME)); cam0.lookAt(MT); cam0.updateMatrixWorld();   // the first view
   const RING_X = 32, RING_Y = 22, RING_LIFT = 12, RING_AT = [18, 90, 162, 234, 306];   // degrees: the ellipse, the aim's height, where each light sits
+  // a thin vertical streak of light, drawn as a sprite that always stands upright on the screen
+  const flareTex = spriteTex(256, (g, S) => {
+    const h = S / 2;
+    const gh = g.createLinearGradient(h - 34, 0, h + 34, 0); gh.addColorStop(0, 'rgba(255,255,255,0)'); gh.addColorStop(0.5, 'rgba(255,255,255,0.3)'); gh.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gh; g.fillRect(h - 34, 0, 68, S);
+    g.fillStyle = 'rgba(255,255,255,1)'; g.fillRect(h - 2.5, 0, 5, S);
+    g.globalCompositeOperation = 'destination-in';
+    const gv = g.createLinearGradient(0, 0, 0, S); gv.addColorStop(0, 'rgba(0,0,0,0)'); gv.addColorStop(0.5, 'rgba(0,0,0,1)'); gv.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gv; g.fillRect(0, 0, S, S);
+  });
+  const crystalEdges = new THREE.EdgesGeometry(new THREE.OctahedronGeometry(1, 0));
   const ringPoint = (k) => { const a = D2R(RING_AT[k]); return { yaw: RING_X * Math.cos(a), pitch: RING_LIFT + RING_Y * Math.sin(a) }; };
   const points = [
     { ...ringPoint(1), dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                 // straight above the ship
@@ -3867,17 +3879,24 @@ function init(){
     const right = new THREE.Vector3().crossVectors(out, V(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, out).normalize();
     const anchor = cam0.position.clone().addScaledVector(out, d.dist), glint = sprite(novaCoreTex, d.color);
     glint.position.copy(anchor); scene.add(glint);
-    const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); scene.add(ring);
+    const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); ring.visible = false; scene.add(ring);   // kept for the events, never shown
     const aura = sprite(nebulaTex, d.color.clone().multiplyScalar(0.3)); aura.position.copy(anchor).addScaledVector(out, 2); aura.visible = false; scene.add(aura);
-    // its twin on the page: a crisp orb over the canvas, always readable even against the bright throat, and tappable
+    // the crystal: two wireframe diamonds turning against each other, bright tips, and a vertical flare. It stays out of sight until the aim nears.
+    const lineMat = (o) => new THREE.LineBasicMaterial({ color: d.color.clone().multiplyScalar(1.5), transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    const grp = new THREE.Group(); grp.position.copy(anchor); grp.visible = false; scene.add(grp);
+    const outer = new THREE.LineSegments(crystalEdges, lineMat(0)); outer.scale.set(0.62, 1, 0.62);
+    const inner = new THREE.LineSegments(crystalEdges, lineMat(0)); inner.scale.set(0.26, 0.42, 0.26);
+    const tips = pointsOf(6, 0.2, d.color.clone().multiplyScalar(1.6)); tips.p.material.opacity = 0;
+    tips.pos.set([0, 1, 0, 0, -1, 0, 0.62, 0, 0, -0.62, 0, 0, 0, 0, 0.62, 0, 0, -0.62], 0); tips.flush();
+    grp.add(outer, inner, tips.p);
+    const beam = new THREE.Sprite(new THREE.SpriteMaterial({ map: flareTex, color: d.color.clone().multiplyScalar(1.5), blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, opacity: 0 })); beam.position.copy(anchor); beam.renderOrder = 2; beam.visible = false; scene.add(beam);
+    // its hit area on the page: invisible, with four lock-on corners that appear as the aim comes close
     const orb = document.createElement('button'); orb.type = 'button'; orb.className = 'light'; orb.setAttribute('aria-label', 'Descubrir un momento oculto'); orb.innerHTML = '<b></b><i></i>'; orb.style.setProperty('--n', '0');
     const cc = d.color.clone(), mx = Math.max(cc.r, cc.g, cc.b); cc.multiplyScalar(1 / mx).convertLinearToSRGB();
     const orbCss = (k) => 'rgb(' + Math.round(k.r * 255) + ',' + Math.round(k.g * 255) + ',' + Math.round(k.b * 255) + ')';
     orb.style.setProperty('--c', orbCss(cc));
-    orb.style.setProperty('--l', orbCss(cc.clone().lerp(new THREE.Color(1, 1, 1), 0.5)));
-    orb.style.setProperty('--d', orbCss(cc.clone().multiplyScalar(0.2)));
     if (LIGHTS) LIGHTS.appendChild(orb);
-    return { anchor, out, right, up, color: d.color, ring, aura, orb, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', n: 0, time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
+    return { anchor, out, right, up, color: d.color, ring, aura, orb, boom: 0, cr: { grp, outer, inner, tips: tips.p, beam }, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', n: 0, time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });
   function nextIndex(p){
     if (!p.bag.length){
@@ -3970,6 +3989,7 @@ function init(){
   }
   // the moment of discovery: a flash and a shock ring where the light was, and a short buzz on phones that allow it
   function discover(p){
+    p.boom = 0.001;
     if (LIGHTS){
       const b = document.createElement('div'); b.className = 'light-burst';
       if (p.orb.style.transform) b.style.transform = p.orb.style.transform; else { b.style.left = '50%'; b.style.top = '35%'; }
@@ -4040,13 +4060,75 @@ function init(){
     const other = found ? 'otra ' : 'la ';
     const text = hint.p
       ? (gyro.on ? 'inclina tu celular hacia ' + other + 'luz' : touchUI ? 'toca ' + other + 'luz' : 'haz clic en ' + other + 'luz')
-      : (gyro.on ? 'sigue la flecha con tu celular' : waiting ? 'toca la pantalla y sigue la flecha' : 'arrastra siguiendo la flecha');
+      : (gyro.on ? 'busca con el radar moviendo tu celular' : waiting ? 'toca la pantalla y busca con el radar' : 'arrastra y busca con el radar');
     if (text !== hint.key){ hint.key = text; hintEl.firstChild.textContent = text; }
     hintEl.classList.toggle('on-aim', !hint.p); hintEl.classList.toggle('below', !hint.p && Math.sin(aim.ang) < -0.3);   // on the aim, the label keeps clear of the arrow
     if (hint.p){ _mndc.copy(hint.p.anchor).project(camera); const r = renderer.domElement.getBoundingClientRect(); hintEl.style.left = ((_mndc.x * 0.5 + 0.5) * r.width).toFixed(1) + 'px'; hintEl.style.top = ((0.5 - _mndc.y * 0.5) * r.height).toFixed(1) + 'px'; }
     else { hintEl.style.left = aim.px.toFixed(1) + 'px'; hintEl.style.top = aim.py.toFixed(1) + 'px'; }
     showHint(true);
     if (hint.t > 7){ showHint(false); hint.n++; hint.t = -8; }   // shows for a few seconds, then again a little later
+  }
+  // the crystal of a light that has just been activated: it swells, spins and fades while its flare stretches out
+  function stepBoom(p, raw){
+    const C = p.cr;
+    if (p.boom > 0){
+      p.boom += raw;
+      const k = Math.min(1, p.boom), e = 1 - Math.pow(1 - k, 3), a = (1 - k) * (1 - k);
+      C.grp.visible = C.beam.visible = k < 1;
+      C.grp.scale.setScalar(0.8 + 3.2 * e); C.grp.rotation.y += raw * 12 * (1 - k); C.inner.rotation.x += raw * 6;
+      C.outer.material.opacity = a; C.inner.material.opacity = a; C.tips.material.opacity = a;
+      C.beam.material.opacity = Math.min(1, 1.4 * a); C.beam.scale.set(0.9 * (1 - 0.6 * k), 9 + 14 * e, 1);
+      if (k >= 1) p.boom = 0;
+    } else if (p.state !== 'idle'){ C.grp.visible = C.beam.visible = false; }
+  }
+  /* the radar: it looks for one pending light at a time, picked at random (never the one just found, never in a fixed order). Like a metal
+     detector it does not point: the blip jumps around when you are far and settles as you get close, the pings come faster, and a phone buzzes. */
+  const radar = { tgt: null, since: 0, pingT: 0, rings: [], sweep: 0 };
+  const RS = 132, RCX = RS / 2, RR = 56, rcv = document.getElementById('radar'), rctx = rcv ? rcv.getContext('2d') : null;
+  function radarPick(exclude){
+    const idle = points.filter((p) => p.state === 'idle'); if (!idle.length) return null;
+    const pool = idle.filter((p) => p !== exclude), from = pool.length ? pool : idle;
+    return from[(Math.random() * from.length) | 0];
+  }
+  function stepRadar(raw, t, ax, ay, cr, quiet){
+    if (!AIM) return;
+    const idle = points.filter((p) => p.state === 'idle'), show = !quiet && idle.length > 0;
+    if (show !== aim.on){ aim.on = show; AIM.classList.toggle('on', show); }
+    if (!show){ radar.tgt = null; return; }
+    AIM.style.transform = 'translate(' + ax.toFixed(1) + 'px,' + ay.toFixed(1) + 'px)';
+    const angOf = (p) => Math.acos(Math.min(1, _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf))) * 57.2958;
+    radar.since += raw;
+    if (!radar.tgt || radar.tgt.state !== 'idle' || (radar.since > 45 && idle.length > 1)){ radar.tgt = radarPick(radar.tgt); radar.since = 0; }
+    let tg = radar.tgt, d = angOf(tg);
+    for (const p of idle){ if (p !== tg && d > 26){ const dd = angOf(p); if (dd < 18){ radar.tgt = tg = p; d = dd; radar.since = 0; } } }   // stumbling on another light makes it the target
+    _mndc.copy(tg.anchor).project(camera);
+    let dx = (_mndc.x * 0.5 + 0.5) * cr.width - ax, dy = (0.5 - _mndc.y * 0.5) * cr.height - ay; if (_mndc.z > 1){ dx = -dx; dy = -dy; }
+    const bearing = Math.atan2(dy, dx); aim.ang = bearing;
+    const sig = smooth(60, 16, d), wob = Math.sin(t * 2.3 + tg.ph) * 0.6 + Math.sin(t * 5.3 + tg.ph * 2) * 0.4;
+    const dispA = bearing + (1 - sig) * 1.0 * wob, dispD = Math.max(0, d + (1 - sig) * 16 * Math.sin(t * 3.7 + tg.ph));   // far: up to about 57° of swing and 16° of distance error
+    radar.sweep = (radar.sweep + raw * 2.2) % 6.2832;
+    radar.pingT += raw;
+    if (radar.pingT >= lerp(2.8, 0.3, sig * sig)){ radar.pingT = 0; radar.rings.push({ r: 4, a: 0.35 + 0.5 * sig }); if (sig > 0.4){ try { if (navigator.vibrate) navigator.vibrate(sig > 0.8 ? 14 : 7); } catch (err){} } }
+    if (!rctx) return;
+    const col = tg.orb.style.getPropertyValue('--c') || 'rgb(130,230,255)';
+    rctx.setTransform(2, 0, 0, 2, 0, 0); rctx.clearRect(0, 0, RS, RS);
+    // no filled disc (it read as a ball): the rings and the cross are drawn twice, a dark underlay and a bright line, so they stay readable on any background
+    for (const pass of [['rgba(2,4,10,0.4)', 3], ['rgba(200,240,255,0.5)', 1]]){
+      rctx.strokeStyle = pass[0]; rctx.lineWidth = pass[1];
+      for (const r of [RR * 0.33, RR * 0.66, RR]){ rctx.beginPath(); rctx.arc(RCX, RCX, r, 0, 6.2832); rctx.stroke(); }
+      rctx.beginPath(); rctx.moveTo(RCX - RR, RCX); rctx.lineTo(RCX + RR, RCX); rctx.moveTo(RCX, RCX - RR); rctx.lineTo(RCX, RCX + RR); rctx.stroke();
+    }
+    for (let i = 0; i < 16; i++){ const a1 = radar.sweep - i * 0.07; rctx.fillStyle = 'rgba(140,255,200,' + (0.26 * (1 - i / 16)).toFixed(3) + ')'; rctx.beginPath(); rctx.moveTo(RCX, RCX); rctx.arc(RCX, RCX, RR, a1 - 0.07, a1); rctx.closePath(); rctx.fill(); }   // the sweep leaves a fading wedge
+    rctx.strokeStyle = 'rgba(190,255,225,0.9)'; rctx.lineWidth = 1.4; rctx.beginPath(); rctx.moveTo(RCX, RCX); rctx.lineTo(RCX + Math.cos(radar.sweep) * RR, RCX + Math.sin(radar.sweep) * RR); rctx.stroke();
+    radar.rings = radar.rings.filter((q) => (q.r += raw * 70) < RR && (q.a -= raw * 0.5) > 0);
+    for (const q of radar.rings){ rctx.strokeStyle = 'rgba(190,240,255,' + Math.max(0, q.a * (1 - q.r / RR)).toFixed(3) + ')'; rctx.lineWidth = 1.2; rctx.beginPath(); rctx.arc(RCX, RCX, q.r, 0, 6.2832); rctx.stroke(); }
+    // the blip is a small diamond: from afar it only shows when the sweep passes over it, and drops out; close, it is steady and bright
+    const rb = lerp(7, RR - 5, smooth(0, 60, dispD)), bx = RCX + Math.cos(dispA) * rb, by = RCX + Math.sin(dispA) * rb;
+    const trail = Math.exp(-((((radar.sweep - dispA) % 6.2832) + 6.2832) % 6.2832) * 1.4);
+    const drop = (1 - sig) > 0.25 && Math.sin(t * 9 + tg.ph * 3) * Math.sin(t * 4.1) > 0.35 + 0.4 * sig ? 0 : 1;
+    const I = Math.max(trail * drop, sig * sig);
+    if (I > 0.03){ const sz = 3 + 4 * sig; rctx.save(); rctx.translate(bx, by); rctx.rotate(Math.PI / 4); rctx.shadowColor = col; rctx.shadowBlur = 10 * I; rctx.fillStyle = col; rctx.globalAlpha = Math.min(1, I); rctx.fillRect(-sz / 2, -sz / 2, sz, sz); rctx.restore(); }
+    rctx.fillStyle = 'rgba(255,255,255,0.85)'; rctx.fillRect(RCX - 1, RCX - 1, 2, 2);   // the centre: where the aim rests
   }
   function updateMoments(raw, t){
     recordPose(performance.now() / 1000);
@@ -4058,6 +4140,7 @@ function init(){
     _mv.set(0, 1, 0).applyQuaternion(camera.quaternion); _mf.multiplyScalar(Math.cos(LIFT)).addScaledVector(_mv, Math.sin(LIFT)).normalize();   // the sweet spot, just above the astronaut
     const playing = points.some((p) => p.state === 'on'), quiet = playing || (quizEl && !quizEl.hidden) || document.body.classList.contains('is-clean');
     const cr = renderer.domElement.getBoundingClientRect();
+    for (const p of points) stepBoom(p, raw);
     for (const p of points){
       let show = false;
       if (p.state === 'idle' && !quiet){
@@ -4086,30 +4169,23 @@ function init(){
       const n = p.n, wave = Math.exp(-Math.pow(((t % 9) - 1 - pi * 0.3) / 0.14, 2)) * (1 - n);   // a rare twinkle runs from star to star
       const call = hint.on && hint.p === p ? 0.5 + 0.5 * Math.sin(t * 6) : 0;
       g.visible = true; p.orb.style.setProperty('--k', (p.dwell / DWELL).toFixed(2)); p.orb.style.setProperty('--n', n.toFixed(3)); p.orb.classList.toggle('flare', wave > 0.4 || call > 0.6);
-      g.material.opacity = Math.min(1, 0.1 + 0.07 * pulse + 0.75 * n + 0.45 * wave + 0.2 * call);
-      g.scale.setScalar(p.glint0 * (0.2 + 0.04 * pulse + 0.7 * n + 0.5 * wave + 0.15 * call + 1.1 * p.dwell / DWELL));
-      p.ring.visible = n > 0.05; p.ring.material.opacity = Math.min(1, 0.55 * n * n + 0.3 * p.dwell / DWELL); p.ring.material.rotation += raw * (0.4 + 1.6 * n);
-      p.ring.scale.setScalar(p.glint0 * (1.8 - 0.6 * n + 0.1 * Math.sin(t * 1.7 + p.ph) - 0.9 * p.dwell / DWELL));   // the ring closes in while you hold the gaze
+      const kd = p.dwell / DWELL, C = p.cr;
+      g.material.opacity = Math.min(1, 0.1 + 0.07 * pulse + 0.5 * n + 0.45 * wave + 0.2 * call);   // far away, only a faint star
+      g.scale.setScalar(p.glint0 * (0.2 + 0.04 * pulse + 0.5 * n + 0.5 * wave + 0.15 * call + 0.6 * kd));
+      p.ring.visible = false;
+      C.grp.visible = C.beam.visible = n > 0.04;
+      if (C.grp.visible){   // the crystal grows out of the star as the aim comes close, turns faster and brighter while the aim rests on it
+        C.grp.scale.setScalar(0.62 * (0.25 + 0.75 * n) * (1 + 0.3 * kd));
+        C.grp.rotation.y += raw * (0.5 + 2.2 * n + 7 * kd); C.inner.rotation.y -= raw * (1.1 + 3 * n + 5 * kd); C.inner.rotation.x += raw * 0.7;
+        C.outer.material.opacity = Math.min(1, n * (0.7 + 0.3 * pulse) + 0.3 * kd);
+        C.inner.material.opacity = Math.min(1, 0.7 * n + 0.4 * kd);
+        C.tips.material.opacity = Math.min(1, n + 0.3 * kd);
+        C.beam.material.opacity = Math.min(1, 0.5 * n * n + 0.5 * kd); C.beam.scale.set(0.5 * (0.5 + n), 2.5 + 6 * n + 6 * kd, 1);
+      }
     }
     _mndc.copy(camera.position).add(_mf).project(camera); aim.y = _mndc.y;
     const ax = (_mndc.x * 0.5 + 0.5) * cr.width, ay = (0.5 - _mndc.y * 0.5) * cr.height; aim.px = ax; aim.py = ay;
-    if (AIM){
-      const show = !quiet && points.some((p) => p.state === 'idle');
-      if (show !== aim.on){ aim.on = show; AIM.classList.toggle('on', show); }
-      if (show){
-        AIM.style.transform = 'translate(' + ax.toFixed(1) + 'px,' + ay.toFixed(1) + 'px)';
-        let best = null, bs = -2, bk = 0;
-        for (const p of points){ if (p.state !== 'idle') continue; const sd = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf); if (sd > bs){ bs = sd; best = p; } bk = Math.max(bk, p.dwell / DWELL); }
-        AIM.style.setProperty('--k', Math.min(1, bk).toFixed(3));
-        if (best){
-          AIM.style.setProperty('--c', best.orb.style.getPropertyValue('--c'));
-          _mndc.copy(best.anchor).project(camera);
-          let dx = (_mndc.x * 0.5 + 0.5) * cr.width - ax, dy = (0.5 - _mndc.y * 0.5) * cr.height - ay; if (_mndc.z > 1){ dx = -dx; dy = -dy; }
-          aim.ang = Math.atan2(dy, dx); AIM.style.setProperty('--a', aim.ang.toFixed(3) + 'rad');
-          AIM.classList.toggle('near', bs > ARROW); AIM.classList.toggle('far', bs <= ARROW);   // the arrow leads the way until a light is about to be caught
-        } else AIM.classList.remove('near', 'far');
-      }
-    }
+    stepRadar(raw, t, ax, ay, cr, quiet);
     updateHint(raw);
     stepFx(raw, t);
   }
@@ -4330,7 +4406,7 @@ function init(){
   if (/debug/.test(location.hash)) window.__momentos = {
     play: (pi, si) => playPoint(points[pi], si),
     look(pi){ setCine(false); camera.position.copy(MT).addScaledVector(points[pi].out, -4.15); camera.lookAt(MT); },
-    points, momentFx, camera, astro, residents, renderer, gyro, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
+    points, momentFx, camera, astro, residents, renderer, gyro, get radar(){ return radar; }, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
   };
 
   /* ---------- lights ---------- */
@@ -4482,7 +4558,7 @@ function init(){
   }
   const btnStab = document.getElementById('btn-estabilizar');
   if (btnStab) btnStab.addEventListener('click', stabilize);
-  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); gyro.hold = null; gyro.pull.phi = gyro.pull.theta = 0; gyro.act = 0; gyro.prev.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'mueve tu celular y sigue la flecha' : ('arrastra y sigue la flecha'); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
+  function setGyro(v){ gyro.on = v; gyro.base = null; gyro.cal = null; gyro.cur.identity(); gyro.rel.identity(); gyro.hold = null; gyro.pull.phi = gyro.pull.theta = 0; gyro.act = 0; gyro.prev.identity(); if (v){ setCine(false); goHome(); } controls.enableRotate = !v; if (MUI.hint) MUI.hint.textContent = v ? 'busca con el radar' : ('arrastra y busca con el radar'); btnGyro.setAttribute('aria-pressed', String(v)); btnGyro.textContent = v ? 'Giroscopio activo' : 'Giroscopio'; }
   async function askGyro(fromTap){
     if (needsAsk){
       try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted'){ if (fromTap) note('Permiso de movimiento denegado. Actívalo en Ajustes › Safari › Movimiento y orientación.'); return; } }
@@ -4501,7 +4577,7 @@ function init(){
       if (MUI.hint) MUI.hint.textContent = 'toca la pantalla y mueve tu celular';
       const once = () => {
         removeEventListener('touchend', once); removeEventListener('click', once);
-        if (!gyro.on) askGyro(true).then(() => { if (!gyro.on){ controls.enableRotate = true; if (MUI.hint) MUI.hint.textContent = ('arrastra y sigue la flecha'); } });
+        if (!gyro.on) askGyro(true).then(() => { if (!gyro.on){ controls.enableRotate = true; if (MUI.hint) MUI.hint.textContent = ('arrastra y busca con el radar'); } });
       };
       addEventListener('touchend', once, { passive: true }); addEventListener('click', once);
     }
