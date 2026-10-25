@@ -2729,6 +2729,7 @@ function init(){
       const free = (q) => { if (q.done) return; q.done = true; q.d.mesh.scale.copy(q.scale0); q.d.captured = false; place(q.d, false); };
       return {
         start(){
+          bh.position.copy(P.anchor); pop.position.copy(P.anchor);   // the light moves after every event
           bh.visible = dust.p.visible = true;
           e1.set(1, 0, 0).applyQuaternion(disk.quaternion); e2.set(0, 1, 0).applyQuaternion(disk.quaternion); e3.set(0, 0, 1).applyQuaternion(disk.quaternion);
           // everything loose within 16 units is pulled in, nearest first
@@ -3917,6 +3918,27 @@ function init(){
     if (LIGHTS) LIGHTS.appendChild(orb);
     return { anchor, out, right, up, color: d.color, ring, aura, orb, boom: 0, cr: { grp, outer, inner, tips: tips.p, beam }, defs: d.defs, bag: shuffle(d.defs.map((_, i) => i).slice(1)), last: 0, first: true, glint, glint0: 0.075 * d.dist, state: 'idle', n: 0, time: 0, dwell: 0, cur: null, ph: Math.random() * 6.28 };
   });
+  /* only one light exists at a time. When its event ends, another group's light appears somewhere else at random (groups not yet seen first),
+     far from the first view and from where the last one was, always within reach of the phone. */
+  const spotHome = sectorOut(0, 12); let lastSpot = null;
+  function relocate(p){
+    let o;
+    for (let i = 0; i < 400; i++){
+      o = sectorOut(-88 + Math.random() * 176, -12 + Math.random() * 38);
+      if (o.angleTo(spotHome) >= D2R(30) && !(lastSpot && o.angleTo(lastSpot) < D2R(55))) break;
+    }
+    lastSpot = o.clone();
+    p.out.copy(o); p.right.crossVectors(o, V(0, 1, 0)).normalize(); p.up.crossVectors(p.right, o).normalize();
+    p.anchor.copy(MT).addScaledVector(o, 13 + Math.random() * 1.5);
+    p.glint.position.copy(p.anchor); p.ring.position.copy(p.anchor); p.aura.position.copy(p.anchor).addScaledVector(o, 2); p.cr.grp.position.copy(p.anchor); p.cr.beam.position.copy(p.anchor);
+    p.n = 0; p.dwell = 0; p.boom = 0; p.ph = Math.random() * 6.28; p.state = 'idle';
+  }
+  function armNext(from){
+    const others = points.filter((q) => q !== from && q.state !== 'on'), fresh = others.filter((q) => !q.seen), pool = fresh.length ? fresh : others;
+    if (pool.length) relocate(pool[(Math.random() * pool.length) | 0]);
+  }
+  points.forEach((p) => { p.state = 'sleep'; p.seen = false; });
+  relocate(points[(Math.random() * points.length) | 0]);
   function nextIndex(p){
     if (!p.bag.length){
       p.bag = shuffle(p.defs.map((_, i) => i));
@@ -4021,9 +4043,8 @@ function init(){
     p.first = false;
     p.last = i;
     try { if (!def.inst) def.inst = def.make(p, def); def.inst.start(); }
-    catch (err){ console.error(err); p.state = 'spent'; p.glint.visible = false; return; }
-    p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false; found++; if (MUI.pips) for (let i = 0; i < MUI.pips.children.length; i++) MUI.pips.children[i].classList.toggle('on', i < found);
-    points.forEach((q) => { if (q !== p && q.state === 'spent') q.state = 'idle'; });   // activating a point brings the spent ones back
+    catch (err){ console.error(err); p.state = 'spent'; p.glint.visible = false; armNext(p); return; }
+    p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false; found++; p.seen = true; if (MUI.pips){ const seen = points.filter((q) => q.seen).length; for (let i = 0; i < MUI.pips.children.length; i++) MUI.pips.children[i].classList.toggle('on', i < seen); }
     toast(def);
     fireBurst(p); astroReact(def, p); focusOn(p.anchor); discover(p);
   }
@@ -4175,10 +4196,10 @@ function init(){
         p.ring.visible = false;
         p.time += raw;
         try { p.cur.inst.update(p.time, raw, t); const fx = ENVFX[p.cur.name]; if (fx) fx(p.time, raw, t, p); } catch (err){ console.error(err); p.time = p.cur.dur; }
-        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; unfocus(); if (cineBack){ cineBack = false; setCine(true); } }
+        if (p.time >= p.cur.dur){ try { p.cur.inst.end(); } catch (err){ console.error(err); } p.state = 'spent'; armNext(p); unfocus(); if (cineBack){ cineBack = false; setCine(true); } }
         continue;
       }
-      if (p.state === 'spent'){ p.glint.visible = p.ring.visible = false; continue; }
+      if (p.state === 'spent' || p.state === 'sleep'){ p.glint.visible = p.ring.visible = false; continue; }
       const s = _mto.copy(p.anchor).sub(camera.position).normalize().dot(_mf), near = smooth(NEAR, GAZE, s);
       p.dwell = p === aimP && s > GAZE && !cineOn() && !playing ? p.dwell + raw : Math.max(0, p.dwell - raw * 2);   // the slow cinematic drift never fires a light by itself, nor does anything while an event plays
       if (p.dwell >= DWELL){ playPoint(p); continue; }
