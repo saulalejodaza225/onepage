@@ -85,9 +85,18 @@
     #nogl[hidden] { display: none; }
     #gyro-note { position: absolute; left: 16px; right: 16px; top: 16px; max-width: 440px; margin: 0 auto; padding: 12px 14px; border-radius: 14px; background: rgba(10,8,24,0.82); border: 1px solid var(--color-border-subtle); color: var(--color-text-main); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; z-index: 3; }
     #gyro-note[hidden] { display: none; }
-    #moments-hud { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; transform: none; z-index: 3; display: block; max-width: calc(100% - 32px); padding: 7px 14px; border-radius: 16px; background: rgba(5,7,13,0.55); border: 1px solid var(--color-border-subtle); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; line-height: 1.4; color: var(--color-text-muted); white-space: normal; text-align: center; width: max-content; pointer-events: none; }
-    #moments-hud .dot { display: inline-block; vertical-align: middle; margin: -2px 6px 0 0; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent-cyan); box-shadow: 0 0 8px var(--color-accent-cyan); animation: momentsPulse 1.8s ease-in-out infinite; }
-    @keyframes momentsPulse { 50% { opacity: 0.3; } }
+    /* the hidden-signals readout: no box, a thin line of light, five small crystals that light up as they are found */
+    #moments-hud { position: absolute; top: calc(18px + env(safe-area-inset-top, 0px)); left: 18px; z-index: 3; max-width: min(62%, 300px); padding: 2px 0 2px 14px; pointer-events: none; font-family: var(--font-mono); color: var(--color-text-muted); text-shadow: 0 1px 10px rgba(3,5,12,0.9), 0 0 2px rgba(3,5,12,0.9); }
+    #moments-hud::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: linear-gradient(180deg, rgba(92,225,255,0) 0%, #5ce1ff 25%, #5ce1ff 75%, rgba(92,225,255,0) 100%); box-shadow: 0 0 10px rgba(92,225,255,0.9); }
+    #moments-hud::after { content: ""; position: absolute; z-index: -1; inset: -16px -46px -16px -22px; background: radial-gradient(ellipse at 28% 50%, rgba(3,5,12,0.7), rgba(3,5,12,0.35) 45%, rgba(3,5,12,0) 75%); pointer-events: none; }
+    #moments-hud .hud-row { display: flex; align-items: center; gap: 10px; }
+    #moments-hud .hud-title { font-size: 10px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--color-text-main); white-space: nowrap; }
+    #moments-hud .hud-pips { display: flex; gap: 5px; }
+    #moments-hud .hud-pips i { display: block; width: 7px; height: 7px; transform: rotate(45deg); border: 1px solid rgba(92,225,255,0.55); background: transparent; transition: background 0.5s, box-shadow 0.5s, border-color 0.5s; animation: momentsPulse 2.4s ease-in-out infinite; }
+    #moments-hud .hud-pips i:nth-child(2) { animation-delay: 0.3s; } #moments-hud .hud-pips i:nth-child(3) { animation-delay: 0.6s; } #moments-hud .hud-pips i:nth-child(4) { animation-delay: 0.9s; } #moments-hud .hud-pips i:nth-child(5) { animation-delay: 1.2s; }
+    #moments-hud .hud-pips i.on { background: var(--color-accent-cyan); border-color: #d8f6ff; box-shadow: 0 0 9px var(--color-accent-cyan); animation: none; }
+    #moments-hud .hud-sub { margin-top: 5px; font-size: 11px; letter-spacing: 0.04em; line-height: 1.35; color: rgba(236,242,255,0.82); }
+    @keyframes momentsPulse { 50% { opacity: 0.35; } }
     #moment-toast { position: absolute; top: calc(52px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; margin: 0 auto; max-width: 340px; z-index: 3; padding: 8px 14px; border-radius: 14px; background: rgba(10,8,24,0.8); border: 1px solid rgba(92,225,255,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-align: center; pointer-events: none; opacity: 0; transform: translateY(-8px); transition: opacity 0.35s ease, transform 0.35s ease; }
     #moment-toast.show { opacity: 1; transform: none; }
     #moment-toast[hidden] { display: none; }
@@ -134,8 +143,8 @@
     #light-hint.on-aim.below::after { bottom: auto; top: -6px; transform: rotate(225deg); }
     @keyframes hintBob { 50% { margin-top: -5px; } }
     /* on a phone the hint is a narrow column at the top-left, so the top light (centre of the view) stays clear of it */
-    @media (max-width: 600px) { #moments-hud { max-width: 36%; } }
-    @media (prefers-reduced-motion: reduce) { #moments-hud .dot, #light-hint.show { animation: none; } }
+    @media (max-width: 600px) { #moments-hud { max-width: 52%; left: 16px; } }
+    @media (prefers-reduced-motion: reduce) { #moments-hud .hud-pips i, #light-hint.show { animation: none; } }
     #btn-gyro, #btn-pause, #btn-hud, #btn-cine, #speed, #speed-out { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
     #loader.done { visibility: hidden; }
     .content-container .button-wrapper { pointer-events: auto; }
@@ -282,7 +291,7 @@
       </div>
       <button id="btn-show" type="button" hidden></button>
       <p id="gyro-note" role="status" hidden></p>
-      <div id="moments-hud"><span class="dot" aria-hidden="true"></span>Hay momentos ocultos · <span id="moments-hint">gira tu celular</span></div>
+      <div id="moments-hud"><div class="hud-row"><span class="hud-title">Señales ocultas</span><span class="hud-pips" id="moments-pips" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div><div class="hud-sub" id="moments-hint">gira tu celular</div></div>
       <div id="moment-toast" role="status" hidden><strong></strong><span></span></div>
       <div id="lights" role="group" aria-label="Momentos ocultos"></div>
       <div id="aim" aria-hidden="true"><canvas id="radar" width="264" height="264"></canvas></div>

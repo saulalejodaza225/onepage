@@ -1278,7 +1278,7 @@ function init(){
     flowMul: 1,                                 // speed (or direction) of the fall through the tunnel
     crack: 0, shatter: 0, crackX: 0.5, crackY: 0.5 };   // the screen breaking like glass
   const residents = [];   // creatures that stay in the tunnel after their event (the whale, the jellyfish, the school…)
-  const MUI = { hint: $('moments-hint'), toast: $('moment-toast') };
+  const MUI = { hint: $('moments-hint'), pips: $('moments-pips'), toast: $('moment-toast') };
   const touchUI = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
   if (MUI.hint) MUI.hint.textContent = 'arrastra y busca con el radar';
 
@@ -3867,17 +3867,25 @@ function init(){
   });
   const crystalEdges = new THREE.EdgesGeometry(new THREE.OctahedronGeometry(1, 0));
   const ringPoint = (k) => { const a = D2R(RING_AT[k]); return { yaw: RING_X * Math.cos(a), pitch: RING_LIFT + RING_Y * Math.sin(a) }; };
+  // the lights are spread around the model, in the hidden sectors: the eye of the abyss keeps its place (up and to the right of the first view),
+  // the other four sit on the far sides and low, so the camera has to travel round the astronaut to reach them. Each one is placed by its
+  // bearing round the astronaut (az 0 = straight away from the first camera, positive to the right) and its height angle (el)
+  const sectorOut = (az, el) => { const a = D2R(az), e = D2R(el); return V(Math.sin(a) * Math.cos(e), Math.sin(e), -Math.cos(a) * Math.cos(e)).applyQuaternion(cam0.quaternion).normalize(); };
   const points = [
-    { ...ringPoint(1), dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                 // straight above the ship
-    { ...ringPoint(0), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },            // right, above the ship
-    { ...ringPoint(2), dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },             // left, above the ship
-    { ...ringPoint(3), dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },              // left, below the ship
-    { ...ringPoint(4), dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }               // right, below the ship
+    { ...ringPoint(0), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },                                          // the eye of the abyss: unchanged
+    { az: -108, el: 8, R: 13, dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                                        // far left, almost behind the ship
+    { az: 152, el: 24, R: 14, dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },                                    // behind the astronaut, high up
+    { az: -42, el: -12, R: 13, dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },                                    // low on the left, under the astronaut
+    { az: 96, el: -24, R: 13, dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }                                      // low on the right side
   ].map((d) => {
-    const y = D2R(d.yaw), x = D2R(d.pitch);
-    const out = V(Math.sin(y) * Math.cos(x), Math.sin(x), -Math.cos(y) * Math.cos(x)).applyQuaternion(cam0.quaternion).normalize();
+    let out, anchor;
+    if (d.az === undefined){
+      const y = D2R(d.yaw), x = D2R(d.pitch);
+      out = V(Math.sin(y) * Math.cos(x), Math.sin(x), -Math.cos(y) * Math.cos(x)).applyQuaternion(cam0.quaternion).normalize();
+      anchor = cam0.position.clone().addScaledVector(out, d.dist);
+    } else { out = sectorOut(d.az, d.el); anchor = MT.clone().addScaledVector(out, d.R); }
     const right = new THREE.Vector3().crossVectors(out, V(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, out).normalize();
-    const anchor = cam0.position.clone().addScaledVector(out, d.dist), glint = sprite(novaCoreTex, d.color);
+    const glint = sprite(novaCoreTex, d.color);
     glint.position.copy(anchor); scene.add(glint);
     const ring = sprite(novaRingTex, d.color.clone().multiplyScalar(0.8)); ring.position.copy(anchor); ring.visible = false; scene.add(ring);   // kept for the events, never shown
     const aura = sprite(nebulaTex, d.color.clone().multiplyScalar(0.3)); aura.position.copy(anchor).addScaledVector(out, 2); aura.visible = false; scene.add(aura);
@@ -4003,7 +4011,7 @@ function init(){
     p.last = i;
     try { if (!def.inst) def.inst = def.make(p, def); def.inst.start(); }
     catch (err){ console.error(err); p.state = 'spent'; p.glint.visible = false; return; }
-    p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false; found++;
+    p.cur = def; p.state = 'on'; p.time = 0; p.dwell = 0; p.glint.visible = false; found++; if (MUI.pips) for (let i = 0; i < MUI.pips.children.length; i++) MUI.pips.children[i].classList.toggle('on', i < found);
     points.forEach((q) => { if (q !== p && q.state === 'spent') q.state = 'idle'; });   // activating a point brings the spent ones back
     toast(def);
     fireBurst(p); astroReact(def, p); focusOn(p.anchor); discover(p);
@@ -4406,7 +4414,7 @@ function init(){
   if (/debug/.test(location.hash)) window.__momentos = {
     play: (pi, si) => playPoint(points[pi], si),
     look(pi){ setCine(false); camera.position.copy(MT).addScaledVector(points[pi].out, -4.15); camera.lookAt(MT); },
-    points, momentFx, camera, astro, residents, renderer, gyro, get radar(){ return radar; }, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
+    points, momentFx, camera, astro, residents, renderer, gyro, get radar(){ return radar; }, viewScore, bestView, setGyro: (v) => setGyro(v), step(n, dt){ for (let i = 0; i < (n || 1); i++) stepFrame(dt || 1 / 30); }, get fp(){ return typeof finalPass !== "undefined" ? finalPass : null; }
   };
 
   /* ---------- lights ---------- */
