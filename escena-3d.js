@@ -3867,23 +3867,34 @@ function init(){
   });
   const crystalEdges = new THREE.EdgesGeometry(new THREE.OctahedronGeometry(1, 0));
   const ringPoint = (k) => { const a = D2R(RING_AT[k]); return { yaw: RING_X * Math.cos(a), pitch: RING_LIFT + RING_Y * Math.sin(a) }; };
-  // the lights are spread around the model, in the hidden sectors: the eye of the abyss keeps its place (up and to the right of the first view),
-  // the other four are spread out to the sides, high and low, all within what a phone can reach by turning about 40° each way (a light behind the astronaut was never found). Each one is placed by its
+  // the lights are spread around the model, in hidden sectors. Each one is placed by its
   // bearing round the astronaut (az 0 = straight away from the first camera, positive to the right) and its height angle (el)
   const sectorOut = (az, el) => { const a = D2R(az), e = D2R(el); return V(Math.sin(a) * Math.cos(e), Math.sin(e), -Math.cos(a) * Math.cos(e)).applyQuaternion(cam0.quaternion).normalize(); };
+  // every visit the five lights land on different random spots, anywhere the phone can reach (about 40° of turn each way, and a good range
+  // of heights), never close to the first view and never close to each other (38° apart at least), so finding them all is a new little hunt each time
+  const scatter = (n) => {
+    const home = sectorOut(0, 12);
+    let put = [];
+    for (let round = 0; round < 200 && put.length < n; round++){   // a fresh try whenever the dice leave a light without room
+      put = [];
+      for (let tries = 0; put.length < n && tries < 300; tries++){
+        const az = -88 + Math.random() * 176, el = -12 + Math.random() * 38, o = sectorOut(az, el);
+        if (o.angleTo(home) < D2R(30) || put.some((q) => q.o.angleTo(o) < D2R(38))) continue;
+        put.push({ az, el, o });
+      }
+    }
+    for (let i = put.length; i < n; i++) put.push({ az: -80 + i * 40, el: 4 + (i % 2) * 14 });   // only if every try failed
+    return put;
+  };
+  const spots = scatter(5);
   const points = [
-    { ...ringPoint(0), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },                                          // the eye of the abyss: unchanged
-    { az: 80, el: -14, R: 13, dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                                         // far right, low
-    { az: -88, el: 26, R: 14, dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },                                    // far left, high up
-    { az: -58, el: -10, R: 13, dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },                                     // low on the left
-    { az: -8, el: -7, R: 13, dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }                                      // low, under the astronaut
-  ].map((d) => {
-    let out, anchor;
-    if (d.az === undefined){
-      const y = D2R(d.yaw), x = D2R(d.pitch);
-      out = V(Math.sin(y) * Math.cos(x), Math.sin(x), -Math.cos(y) * Math.cos(x)).applyQuaternion(cam0.quaternion).normalize();
-      anchor = cam0.position.clone().addScaledVector(out, d.dist);
-    } else { out = sectorOut(d.az, d.el); anchor = MT.clone().addScaledVector(out, d.R); }
+    { color: HC(2.0, 0.5, 1.6), defs: CREATURES },
+    { color: HC(0.5, 1.4, 2.0), defs: TIME },
+    { color: HC(0.6, 2.2, 1.2), defs: VISITORS },
+    { color: HC(2.2, 1.3, 0.6), defs: PHYSICS },
+    { color: HC(1.0, 0.8, 2.6), defs: SIGNALS }
+  ].map((d, i) => ({ ...d, az: spots[i].az, el: spots[i].el, R: 13 + Math.random() * 1.5, dist: 14 })).map((d) => {
+    const out = sectorOut(d.az, d.el), anchor = MT.clone().addScaledVector(out, d.R);
     const right = new THREE.Vector3().crossVectors(out, V(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, out).normalize();
     const glint = sprite(novaCoreTex, d.color);
     glint.position.copy(anchor); scene.add(glint);
