@@ -3868,15 +3868,15 @@ function init(){
   const crystalEdges = new THREE.EdgesGeometry(new THREE.OctahedronGeometry(1, 0));
   const ringPoint = (k) => { const a = D2R(RING_AT[k]); return { yaw: RING_X * Math.cos(a), pitch: RING_LIFT + RING_Y * Math.sin(a) }; };
   // the lights are spread around the model, in the hidden sectors: the eye of the abyss keeps its place (up and to the right of the first view),
-  // the other four sit on the far sides and low, so the camera has to travel round the astronaut to reach them. Each one is placed by its
+  // the other four are spread out to the sides, high and low, all within what a phone can reach by turning about 40° each way (a light behind the astronaut was never found). Each one is placed by its
   // bearing round the astronaut (az 0 = straight away from the first camera, positive to the right) and its height angle (el)
   const sectorOut = (az, el) => { const a = D2R(az), e = D2R(el); return V(Math.sin(a) * Math.cos(e), Math.sin(e), -Math.cos(a) * Math.cos(e)).applyQuaternion(cam0.quaternion).normalize(); };
   const points = [
     { ...ringPoint(0), dist: 14, color: HC(2.0, 0.5, 1.6), defs: CREATURES },                                          // the eye of the abyss: unchanged
-    { az: -108, el: 8, R: 13, dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                                        // far left, almost behind the ship
-    { az: 152, el: 24, R: 14, dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },                                    // behind the astronaut, high up
-    { az: -42, el: -12, R: 13, dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },                                    // low on the left, under the astronaut
-    { az: 96, el: -24, R: 13, dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }                                      // low on the right side
+    { az: 80, el: -14, R: 13, dist: 14, color: HC(0.5, 1.4, 2.0), defs: TIME },                                         // far right, low
+    { az: -88, el: 26, R: 14, dist: 14, color: HC(0.6, 2.2, 1.2), defs: VISITORS },                                    // far left, high up
+    { az: -58, el: -10, R: 13, dist: 14, color: HC(2.2, 1.3, 0.6), defs: PHYSICS },                                     // low on the left
+    { az: -8, el: -7, R: 13, dist: 14, color: HC(1.0, 0.8, 2.6), defs: SIGNALS }                                      // low, under the astronaut
   ].map((d) => {
     let out, anchor;
     if (d.az === undefined){
